@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner';
 import { createClient } from '@/utils/supabase/client';
 import { getDriverStats, getDriverAllAssets, getReceivers } from '@/app/actions/driverActions';
+import { CashHandoverCard } from '@/components/driver/CashHandoverCard';
 
 export default function DriverDashboard() {
   const supabase = createClient();
@@ -194,33 +195,11 @@ export default function DriverDashboard() {
 
         {/* B. HERO CARD (WALLET) */}
         {/* B. HERO CARD (WALLET) */}
-        <div className="relative overflow-hidden rounded-2xl p-6 shadow-md bg-white border border-slate-100">
-          <div className="relative z-10">
-            <div className="flex justify-between items-start mb-2">
-              <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">Cash in Hand</p>
-              {stats.cashLiability >= 10000 ? (
-                <div className="px-3 py-1 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black uppercase tracking-wide border border-rose-100">
-                  Deposit Needed
-                </div>
-              ) : (
-                <div className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-wide border border-emerald-100">
-                  Limit Safe
-                </div>
-              )}
-            </div>
-
-            <h2 className={`text-4xl font-black mb-4 tracking-tight ${stats.cashLiability >= 10000 ? 'text-rose-600' : 'text-emerald-600'}`}>
-              <span className="text-2xl font-bold opacity-60 mr-1 text-slate-400">Rs.</span>
-              {stats.cashLiability.toLocaleString()}
-            </h2>
-
-            <div className="flex items-center justify-end">
-              <Link href="/driver/history" className="flex items-center gap-1 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors">
-                View History <ChevronRight size={16} />
-              </Link>
-            </div>
-          </div>
-        </div>
+        {/* B. HERO CARD (WALLET) */}
+        <CashHandoverCard
+          balance={stats.cashLiability}
+          onRefresh={loadDashboardData}
+        />
 
         {/* C. ACTION GRID */}
         <div className="grid grid-cols-2 gap-4">

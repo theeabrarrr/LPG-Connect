@@ -165,168 +165,26 @@ export async function completeDelivery(formData: FormData) {
         }
     }
 
-    // C. UPDATE ORDER STATUS
-    const { error: updateError } = await supabase
-        .from('orders')
-        .update({
-            status: 'delivered', // or 'completed'
-            amount_received: receivedAmount,
-            payment_method: paymentMethod,
-            trip_completed_at: new Date().toISOString(),
-            notes: notes
-            // proof_url column might not exist on orders table, kept in transaction
-        })
-        .eq('id', orderId)
-        .eq('tenant_id', tenantId);
+    // C. CALL ATOMIC RPC (Replaces all manual updates)
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('complete_order_transaction', {
+        p_order_id: orderId,
+        p_driver_id: user.id,
+        p_tenant_id: tenantId,
+        p_received_amount: receivedAmount,
+        p_payment_method: paymentMethod || 'cash',
+        p_returned_serials: returnedSerials,
+        p_returned_empty_count: returnedEmptyCount,
+        p_notes: notes,
+        p_proof_url: proofUrl
+    });
 
-    if (updateError) return { error: `Order Update Failed: ${updateError.message}` };
-
-    // D. FINANCIALS
-    const totalDue = order.total_amount;
-    const remainingBalance = totalDue - receivedAmount;
-
-    // 1. Log Transactions (Double-Entry Style)
-    // We STRICTLY record the Sale (Debit) and the Payment (Credit) separately.
-    try {
-        // Step 1: Record Sales (Debit) - ALWAYS
-        const { error: saleError } = await supabase.from('transactions').insert({
-            tenant_id: tenantId,
-            order_id: orderId,
-            customer_id: order.customer_id,
-            user_id: user.id,
-            type: 'sale', // Always a sale
-            amount: totalDue, // POSITIVE (Increases Debt)
-            payment_method: paymentMethod || 'pending',
-            description: `Order #${order.friendly_id || orderId} - Delivered`,
-            proof_url: proofUrl,
-            created_at: new Date().toISOString()
-        });
-
-        if (saleError) throw new Error(`Failed to record Sale Transaction: ${saleError.message}`);
-
-        // Step 2: Record Payment (Credit) - IF PAID
-        if (receivedAmount > 0) {
-            // Add slight delay to ensure Payment appears AFTER Sale in time-sorted lists if ms resolution matches
-            const paymentDate = new Date();
-            paymentDate.setSeconds(paymentDate.getSeconds() + 1);
-
-            const { error: payError } = await supabase.from('transactions').insert({
-                tenant_id: tenantId,
-                order_id: orderId,
-                customer_id: order.customer_id,
-                user_id: user.id,
-                type: 'payment', // Credit
-                amount: -receivedAmount, // NEGATIVE (Decreases Debt)
-                payment_method: paymentMethod || 'cash',
-                description: `Payment Received (Order #${order.friendly_id || orderId})`,
-                proof_url: proofUrl,
-                created_at: paymentDate.toISOString()
-            });
-
-            if (payError) throw new Error(`Failed to record Payment Transaction: ${payError.message}`);
-
-            // Update Driver Wallet (Liability) if CASH
-            // Update Driver Wallet (Liability)
-            // Fix: Allow wallet update for 'credit' orders if they have a partial cash payment.
-            // We assume 'cash' and 'credit' (partial) involve physical money. 'bank' does not.
-            // Update Driver Wallet (Liability)
-            // Fix: We unconditionally update wallet if ANY cash is received (amount > 0), 
-            // regardless of whether the order is marked 'cash' or 'credit'.
-            // This handles partial payments correctly.
-            const { data: w } = await supabase.from('employee_wallets').select('balance').eq('user_id', user.id).single();
-            const current = w?.balance || 0;
-            await supabase.from('employee_wallets').upsert({
-                user_id: user.id,
-                balance: current + receivedAmount,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'user_id' });
-        }
-    } catch (err: any) {
-        console.error("Critical Financial Error:", err);
-        return { error: `Financial Record Failed: ${err.message}` };
+    if (rpcError) {
+        console.error("RPC Error:", rpcError);
+        return { error: `Transaction Failed: ${rpcError.message}` };
     }
 
-    // 2. Update Customer Balance (Debt)
-    // Formula: New = Old + Sale - Paid
-    const { data: cust } = await supabase.from('customers').select('current_balance').eq('id', order.customer_id).single();
-    const currentBalance = cust?.current_balance || 0;
-    const newBalance = currentBalance + remainingBalance; // remainingBalance is (total - paid). We ADD to increase positive debt.
-
-    if (newBalance !== currentBalance) {
-        await supabase.from('customers')
-            .update({ current_balance: newBalance })
-            .eq('id', order.customer_id)
-            .eq('tenant_id', tenantId);
-    }
-
-    // E. INVENTORY: MOVE DELIVERED STOCK (Driver -> Customer)
-    // 1. Move using Robust Link (Last Order ID)
-    const { data: movedCylinders } = await supabase.from('cylinders').update({
-        current_location_type: 'customer',
-        current_holder_id: order.customer_id,
-        status: 'at_customer',
-        updated_at: new Date().toISOString()
-    })
-        .eq('last_order_id', order.id)
-        .eq('tenant_id', tenantId)
-        .select('id');
-
-    // 2. Fallback
-    const hasMoved = movedCylinders && movedCylinders.length > 0;
-
-    if (!hasMoved && requiredQty > 0) {
-        const { data: fallbackStock } = await supabase
-            .from('cylinders')
-            .select('id')
-            .eq('current_holder_id', user.id)
-            .eq('current_location_type', 'driver')
-            .eq('status', 'full')
-            .eq('tenant_id', tenantId)
-            .limit(requiredQty);
-
-        if (fallbackStock && fallbackStock.length > 0) {
-            const ids = fallbackStock.map(c => c.id);
-            await supabase.from('cylinders').update({
-                current_location_type: 'customer',
-                current_holder_id: order.customer_id,
-                status: 'at_customer',
-                last_order_id: order.id
-            }).in('id', ids).eq('tenant_id', tenantId);
-        }
-    }
-
-    // F. INVENTORY: PROCESS RETURNS (ASSET SWAP) (Customer -> Driver)
-    if (returnedSerials.length > 0) {
-        // Specific Asset Return
-        await supabase.from('cylinders').update({
-            current_location_type: 'driver',
-            current_holder_id: user.id,
-            status: 'empty', // Mark as Empty on return
-            updated_at: new Date().toISOString()
-        })
-            .in('serial_number', returnedSerials)
-            .eq('tenant_id', tenantId);
-    }
-    // Legacy Fallback (Count Only - Grab ANY cylinder from customer)
-    // Only if no serials provided but count > 0
-    else if (returnedEmptyCount > 0) {
-        const { data: customerStock } = await supabase
-            .from('cylinders')
-            .select('id')
-            .eq('current_holder_id', order.customer_id)
-            .eq('current_location_type', 'customer')
-            .eq('tenant_id', tenantId)
-            .limit(returnedEmptyCount);
-
-        if (customerStock && customerStock.length > 0) {
-            const returnIds = customerStock.map(c => c.id);
-            await supabase.from('cylinders').update({
-                current_location_type: 'driver',
-                current_holder_id: user.id,
-                status: 'empty',
-                updated_at: new Date().toISOString()
-            }).in('id', returnIds).eq('tenant_id', tenantId);
-        }
+    if (!rpcResult.success) {
+        return { error: rpcResult.message };
     }
 
     revalidatePath('/driver');

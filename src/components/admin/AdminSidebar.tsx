@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Cylinder, Users, Settings, LogOut, Briefcase, ShoppingCart, Database, CheckSquare, ClipboardList, Landmark, FileText } from "lucide-react";
+import { LayoutDashboard, Cylinder, Users, Settings, LogOut, Briefcase, ShoppingCart, Database, CheckSquare, ClipboardList, Landmark, FileText, Banknote } from "lucide-react";
 import { cn } from "@/lib/utils";
 import LogoutBtn from "@/components/LogoutBtn";
 
@@ -16,6 +16,7 @@ const navItems = [
     { href: "/admin/finance", label: "Finance", icon: Landmark },
     { href: "/admin/expenses", label: "Expenses", icon: ClipboardList },
     { href: "/admin/finance/reports", label: "Reports", icon: FileText },
+    { href: "/admin/finance/handovers", label: "Cash Handovers", icon: Banknote },
     { href: "/admin/customers", label: "Customer CRM", icon: Users },
     { href: "/admin/users", label: "Staff", icon: Briefcase },
     { href: "/admin/settings", label: "Settings", icon: Settings },
