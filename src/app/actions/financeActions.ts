@@ -266,3 +266,113 @@ export async function getOutstandingBalances() {
 
     return { success: true, data };
 }
+
+// 8. RECONCILIATION REPORT (Detect Discrepancies)
+export async function getReconciliationReport() {
+    const supabase = await createClient();
+
+    // Auth & Tenant
+    let tenantId: string;
+    try {
+        const id = await getCurrentUserTenantId();
+        if (!id) return { success: false, error: 'Authentication required' };
+        tenantId = id;
+    } catch (error) {
+        return { success: false, error: 'Authentication required' };
+    }
+
+    // 1. Fetch All Customers with their current cached balance
+    const { data: customers, error: custError } = await supabase
+        .from('customers')
+        .select('id, name, current_balance')
+        .eq('tenant_id', tenantId);
+
+    if (custError) return { success: false, error: custError.message };
+
+    // 2. Fetch Aggregated Transaction Sums (The Truth)
+    // We can't do a complex join-aggregate easily with Supabase client (limited group by).
+    // So we'll fetch raw transactions and aggregate in JS (assuming < 10k transactions for now).
+    // For Production: Use a Postgres RPC for this aggregation!
+    // RPC Name Idea: `get_customer_ledger_sums(tenant_id)`
+
+    const { data: txns, error: txnError } = await supabase
+        .from('transactions')
+        .select('customer_id, amount')
+        .eq('tenant_id', tenantId);
+
+    if (txnError) return { success: false, error: txnError.message };
+
+    // 3. Aggregate in JS
+    const realBalances: Record<string, number> = {};
+
+    txns.forEach(t => {
+        if (!realBalances[t.customer_id]) realBalances[t.customer_id] = 0;
+        realBalances[t.customer_id] += (t.amount || 0);
+    });
+
+    // 4. Compare & Find Discrepancies
+    interface Discrepancy {
+        customerId: string;
+        customerName: string;
+        systemBalance: number;
+        realBalance: number;
+        variance: number;
+    }
+
+    const discrepancies: Discrepancy[] = [];
+
+    customers.forEach(c => {
+        const real = realBalances[c.id] || 0;
+        const system = c.current_balance || 0;
+        // Float precision handling
+        const diff = Math.abs(system - real);
+
+        if (diff > 0.01) { // Tolerance for float errors
+            discrepancies.push({
+                customerId: c.id,
+                customerName: c.name,
+                systemBalance: system,
+                realBalance: real,
+                variance: system - real
+            });
+        }
+    });
+
+    return {
+        success: true,
+        data: discrepancies,
+        totalChecked: customers.length,
+        totalDiscrepancies: discrepancies.length
+    };
+}
+
+// 9. FIX BALANCE (One-Click Repair)
+export async function fixCustomerBalance(customerId: string, correctBalance: number) {
+    const supabase = await createClient();
+
+    let tenantId: string;
+    try {
+        const id = await getCurrentUserTenantId();
+        if (!id) return { success: false, error: 'Authentication required' };
+        tenantId = id;
+    } catch (error) {
+        return { success: false, error: 'Authentication required' };
+    }
+
+    // Update
+    const { error } = await supabase
+        .from('customers')
+        .update({
+            current_balance: correctBalance,
+            updated_at: new Date().toISOString()
+        })
+        .eq('id', customerId)
+        .eq('tenant_id', tenantId);
+
+    if (error) return { success: false, error: error.message };
+
+    revalidatePath('/admin/finance/reconciliation');
+    revalidatePath('/admin/customers');
+
+    return { success: true };
+}
