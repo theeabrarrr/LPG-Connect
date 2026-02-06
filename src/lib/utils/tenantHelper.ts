@@ -50,29 +50,3 @@ export async function verifyTenantAccess(tenantId: string): Promise<boolean> {
         return false
     }
 }
-
-/**
- * Get current user's full profile including role
- * @returns User object with tenant_id and role
- */
-export async function getCurrentUser() {
-    const supabase = await createClient()
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-        throw new Error('User not authenticated')
-    }
-
-    const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single()
-
-    if (userError || !userData) {
-        throw new Error('Failed to fetch user profile')
-    }
-
-    return userData
-}
