@@ -4,51 +4,81 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog'
 import Image from 'next/image'
-import { Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Loader2 } from 'lucide-react'
 
 interface HandoverProofDialogProps {
+  isOpen: boolean
+  onClose: () => void
   proofUrl?: string | null
-  senderName?: string
+  senderName?: string // Keeping this optional prop if needed, though not strictly used in new interface call
+  onApprove: () => void
+  onReject: () => void
+  isProcessing: boolean
 }
 
-export function HandoverProofDialog({ proofUrl, senderName }: HandoverProofDialogProps) {
-  if (!proofUrl) {
-    return (
-      <Button variant="ghost" size="icon" disabled title="No Proof">
-        <Eye className="h-4 w-4 text-gray-400" />
-      </Button>
-    )
-  }
+export function HandoverProofDialog({
+  isOpen,
+  onClose,
+  proofUrl,
+  senderName,
+  onApprove,
+  onReject,
+  isProcessing
+}: HandoverProofDialogProps) {
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" title="View Proof">
-          <Eye className="h-4 w-4 text-blue-600" />
-        </Button>
-      </DialogTrigger>
+    <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Proof for Handover from {senderName || 'Driver'}</DialogTitle>
+          <DialogTitle>Verify Cash Handover</DialogTitle>
           <DialogDescription>
-            This is the image provided as proof of cash handover.
+            {senderName ? `Proof from ${senderName}.` : 'Review the proof of payment below.'}
           </DialogDescription>
         </DialogHeader>
-        <div className="relative w-full h-96 mt-4 border rounded-md overflow-hidden">
-          <Image
-            src={proofUrl}
-            alt={`Handover proof from ${senderName}`}
-            layout="fill"
-            objectFit="contain"
-            className="rounded-md"
-          />
+
+        <div className="relative w-full h-96 mt-4 border rounded-md bg-gray-50 flex items-center justify-center overflow-hidden">
+          {proofUrl ? (
+            <Image
+              src={proofUrl}
+              alt="Handover proof"
+              fill
+              className="object-contain"
+            />
+          ) : (
+            <p className="text-gray-500">No proof image available</p>
+          )}
         </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            variant="destructive"
+            onClick={onReject}
+            disabled={isProcessing}
+          >
+            Reject
+          </Button>
+          <Button
+            variant="default"
+            onClick={onApprove}
+            disabled={isProcessing}
+            className="bg-green-600 hover:bg-green-700 text-white"
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Processing
+              </>
+            ) : (
+              'Approve Receipt'
+            )}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

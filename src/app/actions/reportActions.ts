@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/utils/supabase/server'
 import { getCurrentUserTenantId } from '@/lib/utils/tenantHelper'
 
 interface DateRange {
@@ -13,14 +13,14 @@ interface DateRange {
  */
 export async function generateDailySalesReport(date: string) {
   const supabase = await createClient()
-  
+
   let tenantId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    tenantId = await getCurrentUserTenantId() as string
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
-  
+
   // Get orders for the day
   const { data: orders, error: ordersError } = await supabase
     .from('orders')
@@ -28,11 +28,11 @@ export async function generateDailySalesReport(date: string) {
     .eq('tenant_id', tenantId)
     .gte('created_at', `${date}T00:00:00`)
     .lte('created_at', `${date}T23:59:59`)
-  
+
   if (ordersError) {
     return { success: false, error: ordersError.message }
   }
-  
+
   // Calculate metrics
   const totalOrders = orders.length
   const completedOrders = orders.filter(o => o.status === 'completed').length
@@ -45,7 +45,7 @@ export async function generateDailySalesReport(date: string) {
   const onlinePayments = orders
     .filter(o => o.payment_method === 'online' && o.status === 'completed') // Changed to payment_method, assuming 'online' payment method
     .reduce((sum, o) => sum + (o.total_amount || 0), 0) // Changed to total_amount
-  
+
   // Get expenses for the day
   const { data: expenses, error: expensesError } = await supabase
     .from('expenses')
@@ -54,9 +54,9 @@ export async function generateDailySalesReport(date: string) {
     .eq('status', 'approved')
     .gte('created_at', `${date}T00:00:00`)
     .lte('created_at', `${date}T23:59:59`)
-  
+
   const totalExpenses = expenses?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0
-  
+
   return {
     success: true,
     data: {
@@ -80,17 +80,17 @@ export async function generateDailySalesReport(date: string) {
 export async function generateMonthlySummary(yearMonth: string) {
   // yearMonth format: YYYY-MM
   const supabase = await createClient()
-  
+
   let tenantId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    tenantId = await getCurrentUserTenantId() as string
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
-  
+
   const startDate = `${yearMonth}-01`
   const endDate = `${yearMonth}-31`
-  
+
   // Revenue from completed orders
   const { data: orders, error: ordersError } = await supabase
     .from('orders')
@@ -99,9 +99,9 @@ export async function generateMonthlySummary(yearMonth: string) {
     .eq('status', 'completed')
     .gte('created_at', startDate)
     .lte('created_at', endDate)
-  
+
   const totalRevenue = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0 // Changed to total_amount
-  
+
   // Expenses
   const { data: expenses, error: expensesError } = await supabase
     .from('expenses')
@@ -110,16 +110,16 @@ export async function generateMonthlySummary(yearMonth: string) {
     .eq('status', 'approved')
     .gte('created_at', startDate)
     .lte('created_at', endDate)
-  
+
   const totalExpenses = expenses?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0
-  
+
   // Group expenses by category
   const expensesByCategory = expenses?.reduce((acc, e) => {
     const category = e.category || 'Other'
     acc[category] = (acc[category] || 0) + (e.amount || 0)
     return acc
   }, {} as Record<string, number>) || {}
-  
+
   return {
     success: true,
     data: {
@@ -139,14 +139,14 @@ export async function generateMonthlySummary(yearMonth: string) {
  */
 export async function generateProfitLossStatement(dateRange: DateRange) {
   const supabase = await createClient()
-  
+
   let tenantId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    tenantId = await getCurrentUserTenantId() as string
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
-  
+
   // Revenue
   const { data: orders } = await supabase
     .from('orders')
@@ -155,9 +155,9 @@ export async function generateProfitLossStatement(dateRange: DateRange) {
     .eq('status', 'completed')
     .gte('created_at', dateRange.startDate)
     .lte('created_at', dateRange.endDate)
-  
+
   const totalRevenue = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0 // Changed to total_amount
-  
+
   // Expenses by category
   const { data: expenses } = await supabase
     .from('expenses')
@@ -166,21 +166,21 @@ export async function generateProfitLossStatement(dateRange: DateRange) {
     .eq('status', 'approved')
     .gte('created_at', dateRange.startDate)
     .lte('created_at', dateRange.endDate)
-  
+
   const expensesByCategory = expenses?.reduce((acc, e) => {
     const category = e.category || 'Other'
     acc[category] = (acc[category] || 0) + (e.amount || 0)
     return acc
   }, {} as Record<string, number>) || {}
-  
+
   const totalExpenses = Object.values(expensesByCategory).reduce((sum, val) => sum + val, 0)
-  
+
   // Calculate EBITDA (simplified for LPG business)
   const grossProfit = totalRevenue - (expensesByCategory['Cost of Goods'] || 0)
   const operatingExpenses = (expensesByCategory['Operational'] || 0) + (expensesByCategory['Fuel'] || 0)
   const EBITDA = grossProfit - operatingExpenses
   const netProfit = totalRevenue - totalExpenses
-  
+
   return {
     success: true,
     data: {
@@ -207,28 +207,28 @@ export async function generateProfitLossStatement(dateRange: DateRange) {
  */
 export async function getOutstandingBalancesReport() {
   const supabase = await createClient()
-  
+
   let tenantId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    tenantId = await getCurrentUserTenantId() as string
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
-  
+
   const { data: customers, error } = await supabase
     .from('customers')
     .select('id, name, phone, address, current_balance, created_at') // Changed to current_balance
     .eq('tenant_id', tenantId)
     .gt('current_balance', 0) // Changed to current_balance
     .order('current_balance', { ascending: false }) // Changed to current_balance
-  
+
   if (error) {
     return { success: false, error: error.message }
   }
-  
+
   const totalOutstanding = customers.reduce((sum, c) => sum + (c.current_balance || 0), 0) // Changed to current_balance
   const customerCount = customers.length
-  
+
   // Categorize by balance range
   const ranges = {
     '0-1000': customers.filter(c => c.current_balance <= 1000).length, // Changed to current_balance
@@ -236,7 +236,7 @@ export async function getOutstandingBalancesReport() {
     '5001-10000': customers.filter(c => c.current_balance > 5000 && c.current_balance <= 10000).length, // Changed to current_balance
     '10000+': customers.filter(c => c.current_balance > 10000).length // Changed to current_balance
   }
-  
+
   return {
     success: true,
     data: {
@@ -254,14 +254,14 @@ export async function getOutstandingBalancesReport() {
  */
 export async function getDriverCommissionReport(driverId: string, dateRange: DateRange) {
   const supabase = await createClient()
-  
+
   let tenantId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    tenantId = await getCurrentUserTenantId() as string
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
-  
+
   // Verify driver belongs to tenant
   const { data: driver, error: driverError } = await supabase
     .from('profiles') // Changed from users
@@ -269,11 +269,11 @@ export async function getDriverCommissionReport(driverId: string, dateRange: Dat
     .eq('id', driverId)
     .eq('tenant_id', tenantId)
     .single()
-  
+
   if (driverError || !driver) {
     return { success: false, error: 'Driver not found' }
   }
-  
+
   // Get completed orders
   const { data: orders } = await supabase
     .from('orders')
@@ -282,14 +282,14 @@ export async function getDriverCommissionReport(driverId: string, dateRange: Dat
     .eq('status', 'completed')
     .gte('created_at', dateRange.startDate)
     .lte('created_at', dateRange.endDate)
-  
+
   const totalCollections = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0 // Changed from amount
   const totalOrders = orders?.length || 0
-  
+
   // Calculate commission (example: 5% of collections)
   const commissionRate = 0.05
   const commission = totalCollections * commissionRate
-  
+
   return {
     success: true,
     data: {

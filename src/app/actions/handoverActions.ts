@@ -150,7 +150,7 @@ export async function rejectHandover(handoverId: string, reason: string) {
 /**
  * Initiate a handover (by driver)
  */
-export async function initiateHandover(amount: number) {
+export async function initiateHandover(amount: number, proofUrl: string) {
   const supabase = await createClient()
 
   let tenantId: string
@@ -186,6 +186,7 @@ export async function initiateHandover(amount: number) {
       tenant_id: tenantId,
       sender_id: userId,
       amount: amount,
+      proof_url: proofUrl,
       status: 'pending' // Initially pending for admin approval
     })
 

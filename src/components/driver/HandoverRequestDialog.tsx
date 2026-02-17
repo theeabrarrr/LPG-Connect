@@ -74,11 +74,7 @@ export function HandoverRequestDialog({ isOpen, onClose, maxAmount, onSuccess }:
                 .getPublicUrl(filePath)
 
             // 2. Submit Handover Request
-            const formData = new FormData()
-            formData.append('amount', amount)
-            formData.append('proof_url', publicUrl)
-
-            const result = await initiateHandover(formData)
+            const result = await initiateHandover(Number(amount), publicUrl)
 
             if (result.success) {
                 toast.success('Handover requested successfully')

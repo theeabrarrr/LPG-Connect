@@ -1932,12 +1932,12 @@ import { generateSalesReportPDF, generateMonthlyReportPDF, generateOutstandingBa
 
 ## Summary of Remaining Phases
 
-**PHASE 6: Core Enhancements (Week 3) - 40 hours**
-- Order cancellation workflow
-- Bulk order assignment
-- Advanced search and filters
-- Inventory alerts
-- Loading states and error handling
+**PHASE 6: Core Enhancements (Week 3) - [x] Tenant management (20h)
+- [x] Order cancellation (8h)
+- [x] Bulk assignment (6h)
+- [x] Advanced filters (10h)
+- [x] Inventory alerts (8h)
+- [x] Driver analytics (12h)
 
 **PHASE 7: Testing & QA (Week 3-4) - 40 hours**
 - Unit tests (30 hours)

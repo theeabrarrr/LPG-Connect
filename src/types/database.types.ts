@@ -44,6 +44,47 @@ export interface Database {
                     [key: string]: any
                 }
             }
+            profiles: {
+                Row: {
+                    id: string
+                    tenant_id: string
+                    full_name: string | null
+                    role: string | null
+                    shift: string | null
+                    phone_number: string | null
+                    vehicle_number: string | null
+                    status: string | null
+                    created_at: string
+                    updated_at: string | null
+                    [key: string]: any
+                }
+                Insert: {
+                    id: string
+                    tenant_id?: string
+                    full_name?: string | null
+                    role?: string | null
+                    shift?: string | null
+                    phone_number?: string | null
+                    vehicle_number?: string | null
+                    status?: string | null
+                    created_at?: string
+                    updated_at?: string | null
+                    [key: string]: any
+                }
+                Update: {
+                    id?: string
+                    tenant_id?: string
+                    full_name?: string | null
+                    role?: string | null
+                    shift?: string | null
+                    phone_number?: string | null
+                    vehicle_number?: string | null
+                    status?: string | null
+                    created_at?: string
+                    updated_at?: string | null
+                    [key: string]: any
+                }
+            }
             orders: {
                 Row: {
                     id: string
@@ -68,6 +109,10 @@ export interface Database {
                 Row: {
                     id: string
                     tenant_id: string
+                    name: string
+                    phone: string
+                    address: string | null
+                    current_balance: number
                     created_at: string
                     [key: string]: any
                 }
@@ -102,7 +147,7 @@ export interface Database {
             [_ in never]: never
         }
         Enums: {
-            [_ in never]: never
+            user_role: "super_admin" | "admin" | "shop_manager" | "driver" | "staff" | "recovery_agent"
         }
     }
 }

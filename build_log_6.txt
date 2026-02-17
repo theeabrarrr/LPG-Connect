@@ -1,0 +1,24 @@
+
+> raza-gas-erp@0.1.0 build C:\Users\User\Desktop\lpg-connect
+> next build
+
+▲ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 53s
+  Running TypeScript ...
+Failed to compile.
+
+./src/app/actions/manageUser.ts:208:57
+Type error: Property 'profiles' does not exist on type '{ users: { Row: { [key: string]: any; id: string; tenant_id: string; email: string; name: string | null; role: string | null; shift: string | null; status: string | null; created_at: string; }; Insert: { ...; }; Update: { ...; }; }; ... 4 more ...; employee_wallets: { ...; }; }'.
+
+[0m [90m 206 |[39m
+ [90m 207 |[39m         [90m// 2. Update Profiles Table (Single source of truth for user profile data)[39m
+[31m[1m>[22m[39m[90m 208 |[39m         [36mconst[39m profileData[33m:[39m [33mDatabase[39m[[32m'public'[39m][[32m'Tables'[39m][[32m'profiles'[39m][[32m'Insert'[39m] [33m=[39m {
+ [90m     |[39m                                                         [31m[1m^[22m[39m
+ [90m 209 |[39m             id[33m:[39m id[33m,[39m
+ [90m 210 |[39m             full_name[33m:[39m name[33m,[39m
+ [90m 211 |[39m             role[33m:[39m role [36mas[39m [33mDatabase[39m[[32m'public'[39m][[32m'Enums'[39m][[32m'user_role'[39m][33m,[39m[0m
+Next.js build worker exited with code: 1 and signal: null
+ ELIFECYCLE  Command failed with exit code 1.
