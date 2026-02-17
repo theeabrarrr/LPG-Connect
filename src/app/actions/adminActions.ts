@@ -16,59 +16,7 @@ const supabaseAdmin = createSupabaseClient(
     }
 );
 
-export async function getAdminStats() {
-    const supabase = await createClient();
 
-    // 1. Get Tenant Context
-    const { data: { user } } = await supabase.auth.getUser();
-    const tenantId = user?.app_metadata?.tenant_id;
-
-    if (!tenantId) {
-        console.error("Critical: No Tenant ID found for stats.");
-        return { totalCylinders: 0, activeDrivers: 0, emptyCylinders: 0, distributedStock: 0 };
-    }
-
-    // 2. Fetch with Explicit Filter (Double Lock)
-    const [cylResult, driverResult, emptyResult, activityResult, distributedResult] = await Promise.allSettled([
-        supabase.from("cylinders").select("*", { count: 'exact', head: true }).eq("current_location_type", "warehouse").eq("tenant_id", tenantId),
-        supabase.from("users").select("*", { count: 'exact', head: true }).eq("role", "driver").eq("tenant_id", tenantId),
-        supabase.from("cylinders").select("*", { count: 'exact', head: true }).eq("status", "empty").eq("tenant_id", tenantId),
-        // Recent Activity (Orders)
-        supabase.from('orders')
-            .select('id, friendly_id, status, total_amount, created_at, customers(name)')
-            .eq('tenant_id', tenantId)
-            .order('created_at', { ascending: false })
-            .limit(5),
-        // Active Assets (Distributed / Not in Godown)
-        supabase.from("cylinders").select("*", { count: 'exact', head: true }).neq("current_location_type", "warehouse").eq("tenant_id", tenantId)
-    ]);
-
-    // Helpers to extract data or log error
-    const processResult = (result: PromiseSettledResult<any>, label: string) => {
-        if (result.status === 'rejected') {
-            console.error(`Error fetching ${label}:`, result.reason);
-            return 0;
-        }
-        if (result.value.error) {
-            console.error(`Error fetching ${label}:`, result.value.error.message);
-            return 0;
-        }
-        return result.value.count || 0;
-    };
-
-    const getActivity = (result: PromiseSettledResult<any>) => {
-        if (result.status === 'fulfilled' && result.value.data) return result.value.data;
-        return [];
-    };
-
-    return {
-        totalCylinders: processResult(cylResult, "Total Cylinders"),
-        activeDrivers: processResult(driverResult, "Active Drivers"),
-        emptyCylinders: processResult(emptyResult, "Empty Cylinders"),
-        distributedStock: processResult(distributedResult, "Distributed Stock"),
-        recentActivity: getActivity(activityResult)
-    };
-}
 
 export async function getTenantInfo() {
     const supabase = await createClient();
@@ -82,7 +30,7 @@ export async function getTenantInfo() {
     // 2. Fetch Tenant Name via Users Join (or metadata if reliable, but DB join is safer for fresh name)
     // Assuming 'users' has 'tenant_id' and we join 'tenants'.
     const { data: profile } = await supabase
-        .from("users")
+        .from("profiles") // Changed from "users" to "profiles"
         .select("tenant_id, tenants(name)")
         .eq("id", user.id)
         .eq("tenant_id", tenantId)
@@ -120,12 +68,12 @@ export async function getTenantUsers() {
     const mappedUsers = profiles?.map((p: any) => ({
         id: p.id,
         name: p.full_name || 'Unknown',
-        email: 'N/A', // Email is not in profiles usually
+        email: p.email || 'N/A', // Email is in profiles now
         role: p.role || 'staff',
         phone_number: p.phone_number,
-        shift: 'Day', // Default as shift is not in profiles
-        created_at: p.updated_at || new Date().toISOString(),
-        profiles: {
+        shift: p.shift || 'Day', // Shift is now in profiles
+        created_at: p.created_at || new Date().toISOString(),
+        profiles: { // Keeping for compatibility with existing UI if any
             vehicle_number: p.vehicle_number,
             phone_number: p.phone_number
         }
@@ -145,18 +93,18 @@ export async function getDrivers() {
 
     // 2. Verified Query
     const { data, error } = await supabase
-        .from('users')
-        .select('id, name')
+        .from('profiles') // Changed from 'users' to 'profiles'
+        .select('id, full_name, email') // Select relevant fields from profiles
         .eq('role', 'driver')
         .eq('tenant_id', tenantId) // Double Lock
-        .order('name');
+        .order('full_name');
 
     if (error) {
         console.error("Error fetching drivers:", error);
         return [];
     }
 
-    return data || [];
+    return data?.map(d => ({ id: d.id, name: d.full_name, email: d.email })) || []; // Map to expected format
 }
 
 // 4. GET PENDING HANDOVERS (Approvals)
@@ -178,17 +126,17 @@ export async function getPendingHandovers() {
     // 2. Fetch Roles manually (since view doesn't have it and join is tricky with permissions)
     const userIds = Array.from(new Set(handovers.map(h => h.user_id).filter(Boolean)));
 
-    const { data: users } = await supabase
-        .from('users')
+    const { data: profiles } = await supabase
+        .from('profiles') // Changed from 'users' to 'profiles'
         .select('id, role')
         .in('id', userIds);
 
     // 3. Merge Role into result as 'users' object to match frontend expectation
     const enrichedData = handovers.map(h => {
-        const u = users?.find(u => u.id === h.user_id);
+        const p = profiles?.find(p => p.id === h.user_id);
         return {
             ...h,
-            users: { role: u?.role || 'driver' } // Default to driver if checking fails
+            users: { role: p?.role || 'driver' } // Default to driver if checking fails
         };
     });
 
@@ -312,14 +260,14 @@ export async function verifyPayment(transactionId: string) {
         await supabase.from('customers').update({ current_balance: newBalance }).eq('id', txn.user_id);
     }
 
-    // C. Update Company Ledger (Real Money In)
-    await supabase.from('company_ledger').insert({
+    // C. Update Company Ledger (Real Money In) - Renamed to customer_ledgers
+    await supabase.from('customer_ledgers').insert({
         tenant_id: tenantId,
-        amount: Math.abs(txn.amount), // Positive Income
+        amount: Math.abs(txn.amount),
         transaction_type: 'credit',
         category: 'customer_payment_verified',
         description: `Verified ${txn.payment_method} from Customer (Txn #${txn.id.slice(0, 8)})`,
-        admin_id: user.id
+        created_by: user.id // Use created_by instead of admin_id
     });
 
     revalidatePath('/admin/approvals');
@@ -420,11 +368,11 @@ export async function getDashboardStats() {
 
     // Parallel Fetching
     const [cashResult, driversResult, assetsResult, emptyResult, ordersResult, recentResult] = await Promise.allSettled([
-        // 1. Total Cash (Sum of Ledger)
-        supabase.from('company_ledger').select('amount').eq('tenant_id', tenantId),
+        // 1. Total Cash (Sum of Ledger) - Renamed from company_ledger to customer_ledgers
+        supabase.from('customer_ledgers').select('amount').eq('tenant_id', tenantId),
 
-        // 2. Active Drivers
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role', 'driver').eq('tenant_id', tenantId),
+        // 2. Active Drivers - Querying profiles table
+        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'driver').eq('tenant_id', tenantId),
 
         // 3. Total Assets
         supabase.from('cylinders').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId),
@@ -509,7 +457,7 @@ export async function getRecentOrders(limit: number = 10) {
 
     const { data, error } = await supabase
         .from('orders')
-        .select('*, customer:customers(name), driver:users!driver_id(name)')
+        .select('*, customer:customers(name), driver:profiles!driver_id(full_name)') // Changed to profiles
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
         .limit(limit);

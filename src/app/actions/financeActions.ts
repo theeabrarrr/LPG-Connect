@@ -7,13 +7,19 @@ import { revalidatePath } from "next/cache";
 // 1. Get Totals (Live Calculation)
 export async function getCompanyStats() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { totalBalance: 0 };
-    const tenantId = user.app_metadata?.tenant_id;
+    let tenantId: string;
+    try {
+        const id = await getCurrentUserTenantId();
+        if (!id) return { totalBalance: 0 };
+        tenantId = id;
+    } catch (error) {
+        console.error("Finance Stats Auth Error:", error);
+        return { totalBalance: 0 };
+    }
 
     // Sum of all amounts
     const { data, error } = await supabase
-        .from('company_ledger')
+        .from('customer_ledgers')
         .select('amount')
         .eq('tenant_id', tenantId);
 
@@ -29,20 +35,27 @@ export async function getCompanyStats() {
 // 2. Get Ledger History
 export async function getLedgerHistory() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return [];
-    const tenantId = user.app_metadata?.tenant_id;
+    let tenantId: string;
+    try {
+        const id = await getCurrentUserTenantId();
+        if (!id) return [];
+        tenantId = id;
+    } catch (error) {
+        console.error("Finance History Auth Error:", error);
+        return [];
+    }
 
     const { data, error } = await supabase
-        .from('company_ledger')
+        .from('customer_ledgers')
         .select(`
             id,
             amount,
             transaction_type,
             description,
             created_at,
-            admin_id,
-            users (name)
+            created_at,
+            created_by,
+            profiles (full_name)
         `)
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
@@ -58,9 +71,15 @@ export async function getLedgerHistory() {
 // 3. GET ALL CUSTOMERS (Lite Version for Dropdown)
 export async function getAllCustomersClient() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { data: [] };
-    const tenantId = user.app_metadata?.tenant_id;
+    let tenantId: string;
+    try {
+        const id = await getCurrentUserTenantId();
+        if (!id) return { data: [] };
+        tenantId = id;
+    } catch (error) {
+        console.error("Customers Client Auth Error:", error);
+        return { data: [] };
+    }
 
     const { data, error } = await supabase
         .from('customers')
@@ -75,11 +94,21 @@ export async function getAllCustomersClient() {
 
 // 4. CREATE TRANSACTION (Smart Action)
 export async function createTransaction(formData: FormData) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { error: "Unauthorized" };
-    const tenantId = user.app_metadata?.tenant_id;
-    if (!tenantId) return { error: "Tenant context missing" };
+        const supabase = await createClient();
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) return { error: "Unauthorized" };
+    
+        let tenantId: string;
+        try {
+            const id = await getCurrentUserTenantId();
+            if (!id) return { error: "Authentication required" };
+            tenantId = id;
+        } catch (error) {
+            console.error("Create Transaction Auth Error:", error);
+            return { error: "Authentication failed" };
+        }
+    
+
 
     // Parse Data
     const type = formData.get('type')?.toString(); // 'income' | 'expense'
@@ -102,13 +131,13 @@ export async function createTransaction(formData: FormData) {
 
     try {
         // A. Create Company Ledger Entry (The visible cash change)
-        const { error: ledgerError } = await supabase.from('company_ledger').insert({
+        const { error: ledgerError } = await supabase.from('customer_ledgers').insert({
             tenant_id: tenantId,
             amount: amount,
             transaction_type: dbTransactionType, // 'credit' or 'debit'
             category: category,                  // Specific category (e.g. 'Customer Payment')
             description: description,
-            admin_id: user.id,
+            created_by: user.id, // Changed from admin_id
             created_at: dateStr || new Date().toISOString()
         });
 
@@ -190,7 +219,7 @@ export async function getLedgerEntries(customerId: string) {
 
     // ✅ Now safe to fetch transactions (ledger)
     const { data, error } = await supabase
-        .from('transactions') // Schema mapped from 'ledgers'
+        .from('customer_ledgers') // Changed from 'transactions'
         .select('*')
         .eq('customer_id', customerId)
         .eq('tenant_id', tenantId)  // ✅ ADDED
@@ -204,7 +233,7 @@ export async function getLedgerEntries(customerId: string) {
 }
 
 // 6. GET CASH BOOK ENTRIES (Company Ledger)
-// Mapped to 'company_ledger' table
+// Mapped to 'cash_book_entries' table
 export async function getCashBookEntries(filters?: { startDate?: string, endDate?: string }) {
     const supabase = await createClient();
 
@@ -218,8 +247,8 @@ export async function getCashBookEntries(filters?: { startDate?: string, endDate
     }
 
     let query = supabase
-        .from('company_ledger') // Schema mapped from 'cash_book_entries'
-        .select('*, user:users(name)')
+        .from('cash_book_entries') // Schema mapped from 'cash_book_entries'
+        .select('*, profiles (full_name)') // User changed to profiles
         .eq('tenant_id', tenantId)  // ✅ ADDED
         .order('created_at', { ascending: false });
 

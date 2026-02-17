@@ -1,75 +1,55 @@
 'use client'
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import Image from 'next/image'
-import { useState } from 'react'
+import { Eye } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface HandoverProofDialogProps {
-    proofUrl: string | null
-    isOpen: boolean
-    onClose: () => void
-    onApprove: () => void
-    onReject: () => void
-    isProcessing: boolean
+  proofUrl?: string | null
+  senderName?: string
 }
 
-export function HandoverProofDialog({
-    proofUrl,
-    isOpen,
-    onClose,
-    onApprove,
-    onReject,
-    isProcessing
-}: HandoverProofDialogProps) {
-    const [imageError, setImageError] = useState(false)
-
+export function HandoverProofDialog({ proofUrl, senderName }: HandoverProofDialogProps) {
+  if (!proofUrl) {
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>Verify Cash Handover</DialogTitle>
-                </DialogHeader>
-
-                <div className="flex flex-col items-center justify-center p-4 space-y-4">
-                    {proofUrl && !imageError ? (
-                        <div className="relative w-full h-64 border rounded-md overflow-hidden bg-gray-100">
-                            <Image
-                                src={proofUrl}
-                                alt="Handover Proof"
-                                fill
-                                style={{ objectFit: 'contain' }}
-                                onError={() => setImageError(true)}
-                            />
-                        </div>
-                    ) : (
-                        <div className="flex items-center justify-center w-full h-40 bg-gray-100 rounded-md text-gray-400">
-                            {imageError ? 'Failed to load image' : 'No proof image provided'}
-                        </div>
-                    )}
-
-                    <p className="text-sm text-gray-500 text-center">
-                        Please verify the actual cash received matches the request amount before approving.
-                    </p>
-                </div>
-
-                <DialogFooter className="flex flex-row space-x-2 sm:justify-end">
-                    <Button
-                        variant="destructive"
-                        onClick={onReject}
-                        disabled={isProcessing}
-                    >
-                        Reject
-                    </Button>
-                    <Button
-                        onClick={onApprove}
-                        disabled={isProcessing}
-                        className="bg-green-600 hover:bg-green-700"
-                    >
-                        {isProcessing ? 'Processing...' : 'Verify & Approve'}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+      <Button variant="ghost" size="icon" disabled title="No Proof">
+        <Eye className="h-4 w-4 text-gray-400" />
+      </Button>
     )
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" title="View Proof">
+          <Eye className="h-4 w-4 text-blue-600" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Proof for Handover from {senderName || 'Driver'}</DialogTitle>
+          <DialogDescription>
+            This is the image provided as proof of cash handover.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="relative w-full h-96 mt-4 border rounded-md overflow-hidden">
+          <Image
+            src={proofUrl}
+            alt={`Handover proof from ${senderName}`}
+            layout="fill"
+            objectFit="contain"
+            className="rounded-md"
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }

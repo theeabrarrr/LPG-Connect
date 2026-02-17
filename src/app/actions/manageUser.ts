@@ -38,10 +38,9 @@ export async function getStaffUsers() {
     }
 
     // 🔒 SECURITY FIX: Filter by both role AND tenant_id
-    // We join with profiles to get vehicle_number and phone_number if needed
     const { data, error } = await supabase
-        .from('users')
-        .select('*, profiles(vehicle_number, phone_number)')
+        .from('profiles') // Changed from 'users' to 'profiles'
+        .select('*')
         .eq('role', 'staff')
         .eq('tenant_id', tenantId)  // ✅ FIXED: Added tenant filter
         .order('created_at', { ascending: false })
@@ -72,8 +71,8 @@ export async function getDriverUsers() {
     }
 
     const { data, error } = await supabase
-        .from('users')
-        .select('*, profiles(vehicle_number, phone_number)')
+        .from('profiles') // Changed from 'users' to 'profiles'
+        .select('*')
         .eq('role', 'driver')
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
@@ -100,8 +99,8 @@ export async function getStaffUserById(userId: string) {
     }
 
     const { data, error } = await supabase
-        .from('users')
-        .select('*, profiles(*)')
+        .from('profiles') // Changed from 'users' to 'profiles'
+        .select('*')
         .eq('id', userId)
         .eq('tenant_id', tenantId)
         .single()
@@ -132,7 +131,7 @@ export async function updateStaffUser(
 
     // 🔒 SECURITY: First verify the user belongs to current tenant
     const { data: existingUser, error: fetchError } = await supabase
-        .from('users')
+        .from('profiles') // Changed from 'users' to 'profiles'
         .select('id, tenant_id')
         .eq('id', userId)
         .single()
@@ -145,7 +144,7 @@ export async function updateStaffUser(
         // 🚨 SECURITY: Attempted cross-tenant access
         await logSecurityEvent('cross_tenant_attempt', {
             userId: userId,
-            targetResource: 'users',
+            targetResource: 'profiles', // Changed from 'users' to 'profiles'
             tenantId: tenantId, // The attacker's tenant (or current user's)
             attemptedTenantId: existingUser.tenant_id, // The target resource's tenant
             action: 'update_staff_user'
@@ -155,8 +154,13 @@ export async function updateStaffUser(
 
     // ✅ Safe to update now
     const { error: updateError } = await supabase
-        .from('users')
-        .update(updates)
+        .from('profiles') // Changed from 'users' to 'profiles'
+        .update({
+            full_name: updates.name,
+            phone_number: updates.phone,
+            status: updates.status,
+            updated_at: new Date().toISOString()
+        })
         .eq('id', userId)
 
     if (updateError) {
@@ -179,18 +183,20 @@ export async function updateUser(prevState: any, formData: FormData) {
     }
 
     try {
-        // 0. Fetch User to get Tenant ID (Critical for Profile Upsert)
-        const { data: existingUser, error: fetchError } = await supabaseAdmin.auth.admin.getUserById(id);
-        if (fetchError || !existingUser?.user) throw new Error("User not found for update");
+        // 0. Fetch User to get Tenant ID from Auth Metadata (if not already known)
+        // This is necessary because the `profiles` table doesn't have `app_metadata` or `user_metadata` directly.
+        const { data: existingAuthUser, error: fetchAuthError } = await supabaseAdmin.auth.admin.getUserById(id);
+        if (fetchAuthError || !existingAuthUser?.user) throw new Error("User not found for update");
 
-        const tenantId = existingUser.user.user_metadata?.tenant_id || existingUser.user.app_metadata?.tenant_id;
+        const tenantId = existingAuthUser.user.user_metadata?.tenant_id || existingAuthUser.user.app_metadata?.tenant_id;
+        if (!tenantId) throw new Error("Tenant ID not found for user");
 
-        // 1. Update Auth Metadata
+        // 1. Update Auth Metadata (for email, role in auth.users table)
         const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(id, {
             user_metadata: {
                 name: name,
                 role: role,
-                shift: shift,
+                // shift is now only in profiles table
                 phone_number: phone,
                 vehicle_number: vehicleNumber,
                 tenant_id: tenantId // Ensure persistence
@@ -198,37 +204,21 @@ export async function updateUser(prevState: any, formData: FormData) {
         });
         if (authError) throw authError;
 
-        // 2. Update Public Table (Manual Sync to be safe)
-        const { error: dbError } = await supabaseAdmin
-            .from('users')
-            .update({
-                name: name,
-                role: role,
-                shift: shift,
-                phone_number: phone
-            })
-            .eq('id', id);
-
-        if (dbError) {
-            throw new Error(`Auth updated but DB sync failed: ${dbError.message}`);
-        }
-
-        // 3. Update Profiles Table (Vehicle & Phone) WITH Tenant ID
+        // 2. Update Profiles Table (Single source of truth for user profile data)
         const profileData: Database['public']['Tables']['profiles']['Insert'] = {
             id: id,
             full_name: name,
-            role: role as Database['public']['Enums']['user_role'], // Cast if role is enum
+            role: role as Database['public']['Enums']['user_role'],
+            shift: shift, // Shift is now in profiles table
             phone_number: phone,
             vehicle_number: vehicleNumber,
+            tenant_id: tenantId, // Crucial for RLS
             updated_at: new Date().toISOString()
         };
 
-        // Only add tenant_id if found, otherwise rely on existing or default
-        if (tenantId) profileData.tenant_id = tenantId;
-
         const { error: profileError } = await supabaseAdmin
             .from('profiles')
-            .upsert(profileData);
+            .upsert(profileData, { onConflict: 'id' }); // Use upsert on id to create/update
 
         if (profileError) {
             console.error("Profile Update Error:", profileError);
@@ -236,7 +226,7 @@ export async function updateUser(prevState: any, formData: FormData) {
         }
 
         revalidatePath('/admin/users');
-        revalidatePath('/driver/profile'); // Ensure driver sees it too
+        revalidatePath('/driver/profile');
         return { success: true, message: 'User updated successfully' };
     } catch (error: any) {
         return { error: error.message };

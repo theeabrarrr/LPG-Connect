@@ -54,7 +54,7 @@ export async function getAllExpenses() {
 
     const { data, error } = await supabase
         .from('expenses')
-        .select('*, user:users(name, role)') // Note: Join might need adjustment depending on schema, strict aliasing used
+        .select('*, profiles(full_name, role)') // Note: Join might need adjustment depending on schema, strict aliasing used
         .eq('tenant_id', tenantId)  // ✅ ADDED
         .order('created_at', { ascending: false })
 
@@ -82,7 +82,7 @@ export async function getPendingExpenses() {
 
     const { data, error } = await supabase
         .from('expenses')
-        .select('*, user:users(name, role)')
+        .select('*, profiles(full_name, role)')
         .eq('status', 'pending')
         .eq('tenant_id', tenantId)  // ✅ ADDED
         .order('created_at', { ascending: false })
