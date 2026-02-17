@@ -367,9 +367,9 @@ export async function getDashboardStats() {
     }
 
     // Parallel Fetching
-    const [cashResult, driversResult, assetsResult, emptyResult, ordersResult, recentResult] = await Promise.allSettled([
-        // 1. Total Cash (Sum of Ledger) - Renamed from company_ledger to customer_ledgers
-        supabase.from('customer_ledgers').select('amount').eq('tenant_id', tenantId),
+    const [cashResult, driversResult, assetsResult, emptyResult, ordersResult, recentResult, fullResult] = await Promise.allSettled([
+        // 1. Total Cash (Source of Truth: cash_book_entries)
+        supabase.from('cash_book_entries').select('amount, transaction_type').eq('tenant_id', tenantId),
 
         // 2. Active Drivers - Querying profiles table
         supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'driver').eq('tenant_id', tenantId),
@@ -392,19 +392,30 @@ export async function getDashboardStats() {
             .select('id, friendly_id, status, total_amount, created_at, customers(name)')
             .eq('tenant_id', tenantId)  // Double check tenant filter
             .order('created_at', { ascending: false })
-            .limit(5)
+            .limit(5),
+
+        // 7. Full Cylinders (In Warehouse) - For Low Stock Alert
+        supabase.from('cylinders')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'full')
+            .eq('current_location_type', 'warehouse')
+            .eq('tenant_id', tenantId)
     ]);
 
-    // Process Cash
+    // Process Cash (Cash In - Cash Out)
     let totalCash = 0;
     if (cashResult.status === 'fulfilled' && cashResult.value.data) {
-        totalCash = cashResult.value.data.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+        totalCash = cashResult.value.data.reduce((acc, curr) => {
+            const amt = Number(curr.amount) || 0;
+            return curr.transaction_type === 'cash_in' ? acc + amt : acc - amt;
+        }, 0);
     }
 
     // Process Counts
     const activeDrivers = driversResult.status === 'fulfilled' ? (driversResult.value.count || 0) : 0;
     const totalAssets = assetsResult.status === 'fulfilled' ? (assetsResult.value.count || 0) : 0;
     const emptyCylinders = emptyResult.status === 'fulfilled' ? (emptyResult.value.count || 0) : 0;
+    const fullCylinders = fullResult.status === 'fulfilled' ? (fullResult.value.count || 0) : 0;
     const recentActivity = recentResult.status === 'fulfilled' && recentResult.value.data ? recentResult.value.data : [];
 
     // Process Chart Data (Group by Day)
@@ -434,6 +445,7 @@ export async function getDashboardStats() {
         activeDrivers,
         totalAssets,
         emptyCylinders,
+        fullCylinders, // Added
         chartData,
         recentActivity
     };
@@ -467,4 +479,138 @@ export async function getRecentOrders(limit: number = 10) {
     }
 
     return { success: true, data };
+}
+
+// 8. CANCEL ORDER
+export async function cancelOrder(orderId: string, reason: string) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) return { success: false, error: "Unauthorized" };
+    if (!orderId) return { success: false, error: "Order ID is missing" };
+    if (!reason) return { success: false, error: "Cancellation reason is required" };
+
+    // Call Atomic RPC
+    const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_order_transaction', {
+        p_order_id: orderId,
+        p_admin_id: user.id,
+        p_reason: reason
+    });
+
+    if (rpcError) {
+        console.error("Cancel RPC Error:", rpcError);
+        return { success: false, error: rpcError.message || "Cancellation Failed (RPC Error)" };
+    }
+
+    const result = rpcData as any;
+    if (!result || !result.success) {
+        return { success: false, error: result?.message || "Cancellation Failed" };
+    }
+
+    revalidatePath('/admin/orders');
+    revalidatePath('/admin/inventory');
+    revalidatePath('/admin/finance');
+
+    return { success: true, message: "Order Cancelled Successfully" };
+}
+
+// 9. BULK ASSIGN ORDERS
+export async function assignOrdersToDriver(orderIds: string[], driverId: string) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) return { success: false, error: "Unauthorized" };
+    if (!orderIds || orderIds.length === 0) return { success: false, error: "No orders selected" };
+    if (!driverId) return { success: false, error: "Driver required" };
+
+    const tenantId = user.app_metadata?.tenant_id;
+    if (!tenantId) return { success: false, error: "Tenant ID missing" };
+
+    // 🔒 SECURITY CHECK: Verify Driver belongs to Tenant
+    const { data: driverCheck } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', driverId)
+        .eq('tenant_id', tenantId)
+        .single();
+
+    if (!driverCheck) return { success: false, error: "Invalid Driver for this Tenant" };
+
+    // ⏳ ATOMIC RPC: Bulk Assign
+    const { data: rpcData, error: rpcError } = await supabase.rpc('bulk_assign_orders', {
+        p_order_ids: orderIds,
+        p_driver_id: driverId,
+        p_tenant_id: tenantId,
+        p_user_id: user.id
+    });
+
+    if (rpcError) {
+        console.error("Bulk Assign RPC Error:", rpcError);
+        return { success: false, error: `Assignment Failed: ${rpcError.message}` };
+    }
+
+    const result = rpcData as any;
+    if (!result || !result.success) {
+        return { success: false, error: result?.message || "Assignment Failed" };
+    }
+
+    revalidatePath('/admin/orders');
+    revalidatePath('/admin/inventory');
+
+    return { success: true, message: result.message };
+}
+
+// 10. DRIVER ANALYTICS
+export async function getDriverAnalytics(driverId: string) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) return { success: false, error: "Unauthorized" };
+    if (!driverId) return { success: false, error: "Driver ID required" };
+
+    const tenantId = user.app_metadata?.tenant_id;
+
+    const [ordersResult, inventoryResult] = await Promise.allSettled([
+        // 1. Order Stats
+        supabase.from('orders')
+            .select('status, total_amount, created_at')
+            .eq('driver_id', driverId)
+            .eq('tenant_id', tenantId)
+            .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()), // Last 30 Days
+
+        // 2. Current Inventory
+        supabase.from('cylinders')
+            .select('status, serial_number')
+            .eq('current_holder_id', driverId)
+            .eq('current_location_type', 'driver')
+            .eq('tenant_id', tenantId)
+    ]);
+
+    const orders = ordersResult.status === 'fulfilled' && ordersResult.value.data ? ordersResult.value.data : [];
+    const inventory = inventoryResult.status === 'fulfilled' && inventoryResult.value.data ? inventoryResult.value.data : [];
+
+    // Calculate Stats
+    const totalOrders = orders.length;
+    const completedOrders = orders.filter(o => o.status === 'completed' || o.status === 'delivered').length;
+    const totalRevenue = orders
+        .filter(o => o.status === 'completed' || o.status === 'delivered')
+        .reduce((sum, o) => sum + (o.total_amount || 0), 0);
+
+    const fullCylinders = inventory.filter(c => c.status === 'full').length;
+    const emptyCylinders = inventory.filter(c => c.status === 'empty').length;
+
+    return {
+        success: true,
+        data: {
+            totalOrders,
+            completedOrders,
+            totalRevenue,
+            currentStock: {
+                full: fullCylinders,
+                empty: emptyCylinders,
+                total: inventory.length
+            },
+            recentOrders: orders.slice(0, 5) // Just first 5 for preview
+        }
+    };
 }

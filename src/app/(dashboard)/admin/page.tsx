@@ -23,6 +23,7 @@ export default async function AdminDashboardPage() {
         activeDrivers = 0,
         totalAssets = 0,
         emptyCylinders = 0,
+        fullCylinders = 0,
         chartData = [],
         recentActivity = []
     } = stats;
@@ -67,17 +68,30 @@ export default async function AdminDashboardPage() {
                     </div>
                 </div>
 
-                {/* Stock Alert (Empty) */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                {/* Available Stock (Low Stock Alert) */}
+                <div className={`p-6 rounded-2xl shadow-sm border flex items-center justify-between ${fullCylinders < 20 ? 'bg-rose-50 border-rose-100' : 'bg-white border-slate-100'}`}>
                     <div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Empty Cylinders</p>
-                        <div className={`text-2xl font-bold ${emptyCylinders > 5 ? 'text-rose-600' : 'text-slate-900'}`}>
-                            {emptyCylinders}
+                        <p className={`text-xs font-bold uppercase tracking-wider mb-1 ${fullCylinders < 20 ? 'text-rose-600' : 'text-slate-400'}`}>
+                            Available Stock
+                        </p>
+                        <div className={`text-2xl font-bold ${fullCylinders < 20 ? 'text-rose-700' : 'text-slate-900'}`}>
+                            {fullCylinders}
                         </div>
-                        {emptyCylinders > 5 && <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-full">Refill Needed</span>}
+                        <div className="flex gap-2 mt-1">
+                            {fullCylinders < 20 && (
+                                <span className="text-[10px] font-bold text-rose-600 bg-white/50 px-2 py-0.5 rounded-full border border-rose-200">
+                                    Low Stock
+                                </span>
+                            )}
+                            {emptyCylinders > 0 && (
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                    {emptyCylinders} Empty
+                                </span>
+                            )}
+                        </div>
                     </div>
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center border ${emptyCylinders > 5 ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
-                        <Database className={`${emptyCylinders > 5 ? 'text-rose-600' : 'text-slate-400'} h-5 w-5`} />
+                    <div className={`h-10 w-10 rounded-full flex items-center justify-center border ${fullCylinders < 20 ? 'bg-rose-100 border-rose-200' : 'bg-emerald-50 border-emerald-100'}`}>
+                        <Database className={`${fullCylinders < 20 ? 'text-rose-600' : 'text-emerald-600'} h-5 w-5`} />
                     </div>
                 </div>
 

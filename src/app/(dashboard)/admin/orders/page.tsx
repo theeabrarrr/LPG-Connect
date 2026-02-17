@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { getOrders } from '@/app/actions/orderActions';
+import { getDrivers, assignOrdersToDriver } from '@/app/actions/adminActions';
 import { format } from 'date-fns';
 import Link from 'next/link';
-import { Printer, Eye, ShoppingCart, Calendar } from 'lucide-react';
+import { Printer, Eye, ShoppingCart, Calendar, Trash2, Truck, CheckSquare, Square, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Database } from '@/types/database.types';
 
@@ -15,29 +16,144 @@ type Order = Database['public']['Tables']['orders']['Row'] & {
 
 export default function OrderListPage() {
     const [orders, setOrders] = useState<Order[]>([]);
+    const [drivers, setDrivers] = useState<{ id: string, name: string }[]>([]);
     const [loading, setLoading] = useState(true);
+
+    // Bulk Selection State
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+    const [selectedDriverId, setSelectedDriverId] = useState('');
+    const [isAssigning, setIsAssigning] = useState(false);
+
+    // Filters
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [driverFilter, setDriverFilter] = useState('all');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [statusFilter, driverFilter, startDate, endDate]);
 
     const loadData = async () => {
         setLoading(true);
-        const data = await getOrders();
-        setOrders(data);
+        const [ordersData, driversData] = await Promise.all([
+            getOrders({
+                status: statusFilter,
+                driverId: driverFilter,
+                startDate: startDate ? new Date(startDate).toISOString() : undefined,
+                endDate: endDate ? new Date(new Date(endDate).setHours(23, 59, 59)).toISOString() : undefined
+            }),
+            getDrivers()
+        ]);
+        setOrders(ordersData);
+        setDrivers(driversData as any || []);
         setLoading(false);
     };
 
+    const toggleSelection = (id: string) => {
+        const newSet = new Set(selectedIds);
+        if (newSet.has(id)) newSet.delete(id);
+        else newSet.add(id);
+        setSelectedIds(newSet);
+    };
+
+    const toggleAll = () => {
+        if (selectedIds.size === orders.length) setSelectedIds(new Set());
+        else setSelectedIds(new Set(orders.map(o => o.id)));
+    };
+
+    const handleBulkAssign = async () => {
+        if (!selectedDriverId) return toast.error("Please select a driver");
+
+        setIsAssigning(true);
+        const res = await assignOrdersToDriver(Array.from(selectedIds), selectedDriverId);
+        setIsAssigning(false);
+
+        if (res.success) {
+            toast.success(res.message);
+            setIsAssignModalOpen(false);
+            setSelectedIds(new Set());
+            setSelectedDriverId('');
+            loadData(); // Refresh list
+        } else {
+            toast.error(res.error);
+        }
+    };
+
     return (
-        <div className="p-8 bg-slate-50 min-h-screen pb-32 font-sans">
-            <div className="flex justify-between items-center mb-8">
+        <div className="p-8 bg-slate-50 min-h-screen pb-32 font-sans relative">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Order History</h1>
                     <p className="text-sm text-slate-500 font-medium">Track all dispatch and sales records</p>
                 </div>
-                <Link href="/admin/orders/new" className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-900/20">
-                    <ShoppingCart size={16} /> New Order
-                </Link>
+                <div className="flex gap-2 w-full md:w-auto">
+                    <Link href="/admin/orders/new" className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-900/20 w-full md:w-auto justify-center">
+                        <ShoppingCart size={16} /> New Order
+                    </Link>
+                </div>
+            </div>
+
+            {/* Filters Bar */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6 flex flex-col md:flex-row gap-4 items-center animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center gap-2 w-full md:w-auto text-slate-500 font-bold text-sm uppercase tracking-wider">
+                    <Calendar size={16} /> Filters
+                </div>
+
+                <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4 w-full">
+                    <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block w-full p-2.5 font-medium outline-none"
+                    >
+                        <option value="all">All Statuses</option>
+                        <option value="pending">Pending</option>
+                        <option value="assigned">Assigned</option>
+                        <option value="on_trip">On Trip</option>
+                        <option value="delivered">Delivered</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+
+                    <select
+                        value={driverFilter}
+                        onChange={(e) => setDriverFilter(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block w-full p-2.5 font-medium outline-none"
+                    >
+                        <option value="all">All Drivers</option>
+                        {drivers.map(d => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                    </select>
+
+                    <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block w-full p-2.5 font-medium outline-none"
+                        placeholder="Start Date"
+                    />
+
+                    <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block w-full p-2.5 font-medium outline-none"
+                        placeholder="End Date"
+                    />
+                </div>
+
+                <button
+                    onClick={() => {
+                        setStatusFilter('all');
+                        setDriverFilter('all');
+                        setStartDate('');
+                        setEndDate('');
+                    }}
+                    className="text-slate-400 hover:text-slate-600 text-xs font-bold uppercase tracking-wider px-2"
+                >
+                    Reset
+                </button>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -45,6 +161,11 @@ export default function OrderListPage() {
                     <table className="w-full text-left">
                         <thead className="bg-slate-50 border-b border-slate-100">
                             <tr>
+                                <th className="p-4 w-12 text-center">
+                                    <button onClick={toggleAll} className="text-slate-400 hover:text-emerald-600">
+                                        {orders.length > 0 && selectedIds.size === orders.length ? <CheckSquare size={20} /> : <Square size={20} />}
+                                    </button>
+                                </th>
                                 <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Order ID</th>
                                 <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Customer</th>
                                 <th className="p-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Driver</th>
@@ -56,12 +177,17 @@ export default function OrderListPage() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
-                                <tr><td colSpan={7} className="p-8 text-center text-slate-400">Loading orders...</td></tr>
+                                <tr><td colSpan={8} className="p-8 text-center text-slate-400">Loading orders...</td></tr>
                             ) : orders.length === 0 ? (
-                                <tr><td colSpan={7} className="p-8 text-center text-slate-400">No orders found.</td></tr>
+                                <tr><td colSpan={8} className="p-8 text-center text-slate-400">No orders found.</td></tr>
                             ) : (
                                 orders.map((order) => (
-                                    <tr key={order.id} className="hover:bg-slate-50 transition-colors">
+                                    <tr key={order.id} className={`hover:bg-slate-50 transition-colors ${selectedIds.has(order.id) ? 'bg-emerald-50/50' : ''}`}>
+                                        <td className="p-4 text-center">
+                                            <button onClick={() => toggleSelection(order.id)} className={`${selectedIds.has(order.id) ? 'text-emerald-600' : 'text-slate-300 hover:text-slate-500'}`}>
+                                                {selectedIds.has(order.id) ? <CheckSquare size={20} /> : <Square size={20} />}
+                                            </button>
+                                        </td>
                                         <td className="p-4 font-mono font-bold text-slate-600 text-xs">
                                             #{order.friendly_id || order.id.slice(0, 8).toUpperCase()}
                                         </td>
@@ -70,7 +196,7 @@ export default function OrderListPage() {
                                             <div className="text-xs text-slate-400">{order.customers?.address || '-'}</div>
                                         </td>
                                         <td className="p-4 text-sm text-slate-600">
-                                            {order.driver?.name || 'Unassigned'}
+                                            {order.driver?.name || <span className="text-amber-500 font-bold text-xs uppercase bg-amber-50 px-2 py-1 rounded-full">Unassigned</span>}
                                         </td>
                                         <td className="p-4 text-sm text-slate-500 flex items-center gap-2">
                                             <Calendar size={14} />
@@ -80,7 +206,8 @@ export default function OrderListPage() {
                                             <span className={`px-2 py-1 rounded-full text-xs font-black uppercase tracking-wider ${order.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
                                                 order.status === 'on_trip' ? 'bg-purple-100 text-purple-700' :
                                                     order.status === 'assigned' ? 'bg-blue-100 text-blue-700' :
-                                                        'bg-amber-100 text-amber-700'
+                                                        order.status === 'pending' ? 'bg-amber-100 text-amber-700' :
+                                                            order.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
                                                 }`}>
                                                 {order.status === 'on_trip' ? 'ON WAY' : order.status}
                                             </span>
@@ -97,6 +224,29 @@ export default function OrderListPage() {
                                                 >
                                                     <Printer size={16} />
                                                 </Link>
+                                                {['assigned', 'pending', 'delivered'].includes(order.status) && (
+                                                    <button
+                                                        onClick={async () => {
+                                                            const reason = window.prompt("Enter cancellation reason:");
+                                                            if (reason) {
+                                                                toast.loading("Cancelling Order...");
+                                                                const { cancelOrder } = await import('@/app/actions/adminActions');
+                                                                const res = await cancelOrder(order.id, reason);
+                                                                toast.dismiss();
+                                                                if (res.success) {
+                                                                    toast.success(res.message);
+                                                                    window.location.reload();
+                                                                } else {
+                                                                    toast.error(res.error);
+                                                                }
+                                                            }
+                                                        }}
+                                                        className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+                                                        title="Cancel Order"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -106,6 +256,71 @@ export default function OrderListPage() {
                     </table>
                 </div>
             </div>
+
+            {/* BULK ACTION BAR */}
+            {selectedIds.size > 0 && (
+                <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in slide-in-from-bottom duration-300">
+                    <div className="bg-slate-900 text-white px-6 py-4 rounded-full shadow-2xl flex items-center gap-6 border border-slate-700">
+                        <div className="font-bold text-sm">
+                            <span className="text-emerald-400 text-lg mr-2">{selectedIds.size}</span>
+                            Orders Selected
+                        </div>
+                        <div className="h-6 w-px bg-slate-700"></div>
+                        <button
+                            onClick={() => setIsAssignModalOpen(true)}
+                            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold text-sm transition-colors"
+                        >
+                            <Truck size={16} /> Assign to Driver
+                        </button>
+                        <button
+                            onClick={() => setSelectedIds(new Set())}
+                            className="text-slate-400 hover:text-white transition-colors"
+                        >
+                            <X size={20} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ASSIGN MODAL */}
+            {isAssignModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-xl font-bold text-slate-900">Assign Orders</h2>
+                            <button onClick={() => setIsAssignModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                <X size={24} />
+                            </button>
+                        </div>
+
+                        <p className="text-slate-500 text-sm mb-6">
+                            Assigning <strong className="text-slate-900">{selectedIds.size} orders</strong> to a driver. This will move reserved inventory to the driver's truck.
+                        </p>
+
+                        <div className="mb-6">
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Select Driver</label>
+                            <select
+                                value={selectedDriverId}
+                                onChange={(e) => setSelectedDriverId(e.target.value)}
+                                className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-bold appearance-none"
+                            >
+                                <option value="">-- Choose Driver --</option>
+                                {drivers.map(d => (
+                                    <option key={d.id} value={d.id}>{d.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <button
+                            onClick={handleBulkAssign}
+                            disabled={isAssigning || !selectedDriverId}
+                            className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-200"
+                        >
+                            {isAssigning ? 'Assigning...' : 'Confirm Assignment'}
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

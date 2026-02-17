@@ -7,7 +7,12 @@ import { revalidatePath } from "next/cache";
  * ORDER ACTIONS - DOUBLE-LOCK SECURITY
  */
 
-export async function getOrders() {
+export async function getOrders(filters?: {
+    startDate?: string;
+    endDate?: string;
+    status?: string;
+    driverId?: string;
+}) {
     const supabase = await createClient();
 
     // 1. Session & Metadata
@@ -20,9 +25,8 @@ export async function getOrders() {
         return [];
     }
 
-    // 2. Double-Lock Query
-    // Joins 'customers' and 'users' (driver) - ensuring tenant isolation on main table is key
-    const { data, error } = await supabase
+    // 2. Build Query
+    let query = supabase
         .from("orders")
         .select(`
             *,
@@ -31,6 +35,20 @@ export async function getOrders() {
         `)
         .eq("tenant_id", tenantId) // Double Lock
         .order("created_at", { ascending: false });
+
+    // 3. Apply Filters
+    if (filters) {
+        if (filters.startDate) query = query.gte('created_at', filters.startDate);
+        if (filters.endDate) {
+            // Adjust end date to end of day if needed, or just standard comparison
+            // Assuming ISO string passed
+            query = query.lte('created_at', filters.endDate);
+        }
+        if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
+        if (filters.driverId && filters.driverId !== 'all') query = query.eq('driver_id', filters.driverId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
         console.error("Error fetching orders:", error);
@@ -65,14 +83,14 @@ export async function createOrder(prevState: any, formData: FormData) {
     const explicitSerials: string[] = serialsJson ? JSON.parse(serialsJson) : [];
 
     // Validation
-    if (!customerId || !driverId) return { error: "Customer and Driver are required" };
+    if (!customerId) return { error: "Customer is required" };
     if (cylindersCount < 1) return { error: "Invalid Quantity" };
 
-    // STOCK CHECK & SELECTION
-    // We need to identify WHICH cylinders to move.
-    // Case A: Manual Selection (Explicit Serials)
-    // Case B: Auto Dispatch (FIFO from Warehouse)
+    // Valid Driver Check (Empty string = Unassigned)
+    const isUnassigned = !driverId || driverId === '' || driverId === 'unassigned';
+    const finalDriverId = isUnassigned ? null : driverId;
 
+    // STOCK CHECK & SELECTION
     let targetCylinderIds: string[] = [];
     let assignedSerials: string[] = [];
 
@@ -118,7 +136,6 @@ export async function createOrder(prevState: any, formData: FormData) {
         }
 
         // 2. Lock/Select N Cylinders
-        // We select ID to lock them for update
         const { data: autoStock, error: autoError } = await supabase
             .from('cylinders')
             .select('id, serial_number')
@@ -135,19 +152,17 @@ export async function createOrder(prevState: any, formData: FormData) {
         assignedSerials = autoStock.map(c => c.serial_number);
     }
 
-
-    // 2. Perform Updates (Pseudo-Transaction via Server Action)
-
+    // 2. Perform Updates
     // A. Create Order
     const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
-            tenant_id: tenantId, // <--- FORCE OVERRIDE
+            tenant_id: tenantId,
             customer_id: customerId,
-            driver_id: driverId, // Assign to driver
+            driver_id: finalDriverId, // Can be null
             cylinders_count: cylindersCount,
             total_amount: totalAmount,
-            status: 'assigned', // Visible to driver immediately
+            status: isUnassigned ? 'pending' : 'assigned', // Pending if no driver
             payment_method: 'pending',
             created_by: user.id
         })
@@ -173,22 +188,28 @@ export async function createOrder(prevState: any, formData: FormData) {
 
     if (itemError) {
         console.error("Create Item Error:", itemError);
-        // Note: In a real DB transaction, we would rollback here. 
     }
 
-    // C. Update Cylinders (Assign to Driver)
-    // CRITICAL: We move the PRE-VALIDATED ids
+    // C. Update Cylinders (Assign to Driver OR Reserve)
+    const cylinderUpdate = isUnassigned ? {
+        status: 'reserved',
+        current_location_type: 'warehouse',
+        current_holder_id: null,
+        last_order_id: order.id,
+        updated_at: new Date().toISOString()
+    } : {
+        status: 'full', // Already full
+        current_location_type: 'driver',
+        current_holder_id: finalDriverId,
+        last_order_id: order.id,
+        updated_at: new Date().toISOString()
+    };
+
     const { error: cylinderError } = await supabase
         .from('cylinders')
-        .update({
-            // status: 'full', // Already full
-            current_location_type: 'driver',
-            current_holder_id: driverId,
-            last_order_id: order.id,
-            updated_at: new Date().toISOString()
-        })
+        .update(cylinderUpdate)
         .in('id', targetCylinderIds)
-        .eq('tenant_id', tenantId); // Double Lock
+        .eq('tenant_id', tenantId);
 
     if (cylinderError) {
         console.error("Cylinder Update Error:", cylinderError);

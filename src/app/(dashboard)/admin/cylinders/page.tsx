@@ -5,7 +5,7 @@ import { createClient } from '@/utils/supabase/client';
 import { toast } from 'sonner';
 import {
     Plus, Filter, RefreshCw, UploadCloud, QrCode, Truck,
-    MoreVertical, Edit, Trash2, Database, Box, CheckCircle
+    MoreVertical, Edit, Trash2, Database, Box, CheckCircle, Clock
 } from 'lucide-react';
 import {
     DropdownMenu,
@@ -57,6 +57,7 @@ export default function CylinderRegistry() {
     const [loading, setLoading] = useState(true);
     const [generating, setGenerating] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showAging, setShowAging] = useState(false);
     const [showQRModal, setShowQRModal] = useState(false);
     const [showImportModal, setShowImportModal] = useState(false);
     const [showPlantModal, setShowPlantModal] = useState(false);
@@ -209,9 +210,17 @@ export default function CylinderRegistry() {
         }
     };
 
-    const filteredCylinders = cylinders.filter(c =>
-        c.serial_number.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredCylinders = cylinders.filter(c => {
+        const matchesSearch = c.serial_number.toLowerCase().includes(searchTerm.toLowerCase());
+
+        if (showAging) {
+            const isAtCustomer = c.status === 'at_customer';
+            const daysSinceUpdate = (new Date().getTime() - new Date(c.updated_at).getTime()) / (1000 * 3600 * 24);
+            return matchesSearch && isAtCustomer && daysSinceUpdate > 30;
+        }
+
+        return matchesSearch;
+    });
 
     const toggleSelect = (id: string) => {
         if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(i => i !== id));
@@ -252,6 +261,12 @@ export default function CylinderRegistry() {
                     <p className="text-slate-500 mt-1 font-medium">Manage gas cylinders and meaningful assets for {tenantName}</p>
                 </div>
                 <div className="flex gap-2">
+                    <button
+                        onClick={() => setShowAging(!showAging)}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold border rounded-lg transition-colors ${showAging ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                    >
+                        <Clock size={16} /> {showAging ? 'Showing Aging (>30 Days)' : 'Show Aging Stock'}
+                    </button>
                     <button onClick={() => setShowPlantModal(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg transition-colors">
                         <Truck size={16} /> Plant Operations
                     </button>

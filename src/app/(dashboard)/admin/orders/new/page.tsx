@@ -97,8 +97,8 @@ export default function NewOrderPage() {
     };
 
     const handleDispatch = async () => {
-        if (!selectedCustomerId || !selectedDriverId) {
-            toast.error('Customer and Driver are required');
+        if (!selectedCustomerId) {
+            toast.error('Customer is required');
             return;
         }
         if (selectedSerials.length !== quantity) {
@@ -188,7 +188,7 @@ export default function NewOrderPage() {
 
                                 {/* Driver */}
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Assign Driver</label>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">Assign Driver <span className="text-slate-400 font-normal">(Optional)</span></label>
                                     <div className="relative">
                                         <select
                                             value={selectedDriverId}

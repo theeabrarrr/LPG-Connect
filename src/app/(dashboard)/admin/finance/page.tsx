@@ -8,7 +8,7 @@ import { format } from 'date-fns';
 import { TransactionModal } from '@/components/admin/TransactionModal';
 
 export default function FinanceDashboard() {
-    const [stats, setStats] = useState({ totalBalance: 0 });
+    const [stats, setStats] = useState({ liquidCash: 0, outstandingReceivables: 0, totalBalance: 0 });
     const [history, setHistory] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -46,20 +46,38 @@ export default function FinanceDashboard() {
                 </div>
             </header>
 
-            {/* 1. STATS CARD */}
             <div className="grid gap-4 md:grid-cols-3">
+                {/* 1. LIQUID CASH (Actual Cash in Safe) */}
                 <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between h-48">
                     <div>
                         <p className="text-slate-500 font-bold uppercase tracking-wider text-xs mb-2">Total Cash in Safe</p>
                         <h2 className="text-4xl font-black tracking-tight text-emerald-600">
-                            Rs {stats.totalBalance.toLocaleString()}
+                            Rs {stats.liquidCash?.toLocaleString() || 0}
                         </h2>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-400">
+                        <DollarSign size={16} />
+                        <span>Physical Cash Available</span>
                     </div>
                 </div>
 
-                {/* Placeholders for Future Stats (Bank, Receivables etc) */}
+                {/* 2. OUTSTANDING RECEIVABLES (Market Debt) */}
+                <div className="bg-white p-8 rounded-3xl border border-slate-100 flex flex-col justify-between h-48">
+                    <div>
+                        <p className="text-slate-500 font-bold uppercase tracking-wider text-xs mb-2">Outstanding Receivables</p>
+                        <h2 className="text-4xl font-black tracking-tight text-blue-600">
+                            Rs {stats.outstandingReceivables?.toLocaleString() || 0}
+                        </h2>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-400">
+                        <TrendingUp size={16} />
+                        <span>Total Customer Debt</span>
+                    </div>
+                </div>
+
+                {/* 3. Placeholder / Net Worth */}
                 <div className="bg-white p-8 rounded-3xl border border-slate-100 flex flex-col justify-center opacity-50 h-48">
-                    <p className="text-slate-400 font-bold uppercase tracking-wider text-xs mb-2">Bank Balance</p>
+                    <p className="text-slate-400 font-bold uppercase tracking-wider text-xs mb-2">Net Financial Position</p>
                     <h2 className="text-3xl font-bold text-slate-300">Coming Soon</h2>
                 </div>
             </div>

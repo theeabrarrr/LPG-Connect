@@ -6,6 +6,7 @@ import { Plus, Building, Users, Activity, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import LogoutBtn from "@/components/LogoutBtn";
+import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -184,7 +185,9 @@ export default function SuperAdminPage() {
                                         <div key={tenant.id} className="p-6 hover:bg-slate-50 transition-colors group">
                                             <div className="flex justify-between items-start mb-2">
                                                 <div>
-                                                    <h3 className="text-lg font-bold text-slate-900">{tenant.name}</h3>
+                                                    <Link href={`/super-admin/tenants/${tenant.id}`} className="hover:underline">
+                                                        <h3 className="text-lg font-bold text-slate-900">{tenant.name}</h3>
+                                                    </Link>
                                                     <p className="text-xs text-muted-foreground font-mono mt-1">{tenant.id}</p>
                                                 </div>
                                                 <Badge variant={tenant.subscription_status === 'active' ? 'success' : 'secondary'}>

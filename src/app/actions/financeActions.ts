@@ -10,26 +10,46 @@ export async function getCompanyStats() {
     let tenantId: string;
     try {
         const id = await getCurrentUserTenantId();
-        if (!id) return { totalBalance: 0 };
+        if (!id) return { liquidCash: 0, outstandingReceivables: 0, totalBalance: 0 };
         tenantId = id;
     } catch (error) {
         console.error("Finance Stats Auth Error:", error);
-        return { totalBalance: 0 };
+        return { liquidCash: 0, outstandingReceivables: 0, totalBalance: 0 };
     }
 
-    // Sum of all amounts
-    const { data, error } = await supabase
-        .from('customer_ledgers')
-        .select('amount')
+    // A. Fetched Liquid Cash (Company Safe)
+    const { data: cashData, error: cashError } = await supabase
+        .from('cash_book_entries')
+        .select('amount, transaction_type')
         .eq('tenant_id', tenantId);
 
-    if (error) {
-        console.error("Finance Stats Error:", error);
-        return { totalBalance: 0 };
+    // B. Fetch Outstanding Debt (Receivables from Customers)
+    // We sum positive balances from customer_ledgers (or directly from customers table for speed)
+    // Let's use customers table current_balance for 'outstanding debt' to be fast.
+    const { data: debtData, error: debtError } = await supabase
+        .from('customers')
+        .select('current_balance')
+        .eq('tenant_id', tenantId)
+        .gt('current_balance', 0); // Only positive balance (debt)
+
+    if (cashError || debtError) {
+        console.error("Finance Stats Error:", cashError || debtError);
+        return { liquidCash: 0, outstandingReceivables: 0, totalBalance: 0 };
     }
 
-    const total = data.reduce((acc, curr) => acc + (curr.amount || 0), 0);
-    return { totalBalance: total };
+    // Calculate Cash
+    const liquidCash = cashData?.reduce((acc, curr) => {
+        return curr.transaction_type === 'cash_in' ? acc + Number(curr.amount) : acc - Number(curr.amount);
+    }, 0) || 0;
+
+    // Calculate Receivables
+    const outstandingReceivables = debtData?.reduce((acc, curr) => acc + Number(curr.current_balance), 0) || 0;
+
+    return {
+        liquidCash,
+        outstandingReceivables,
+        totalBalance: outstandingReceivables // Backward compatibility just in case
+    };
 }
 
 // 2. Get Ledger History
@@ -94,20 +114,20 @@ export async function getAllCustomersClient() {
 
 // 4. CREATE TRANSACTION (Smart Action)
 export async function createTransaction(formData: FormData) {
-        const supabase = await createClient();
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) return { error: "Unauthorized" };
-    
-        let tenantId: string;
-        try {
-            const id = await getCurrentUserTenantId();
-            if (!id) return { error: "Authentication required" };
-            tenantId = id;
-        } catch (error) {
-            console.error("Create Transaction Auth Error:", error);
-            return { error: "Authentication failed" };
-        }
-    
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return { error: "Unauthorized" };
+
+    let tenantId: string;
+    try {
+        const id = await getCurrentUserTenantId();
+        if (!id) return { error: "Authentication required" };
+        tenantId = id;
+    } catch (error) {
+        console.error("Create Transaction Auth Error:", error);
+        return { error: "Authentication failed" };
+    }
+
 
 
     // Parse Data
@@ -127,57 +147,48 @@ export async function createTransaction(formData: FormData) {
     }
 
     // Map to DB Allowed Types (credit/debit)
-    const dbTransactionType = type === 'income' ? 'credit' : 'debit';
+    // Note: RPC handles method mapping internally
 
     try {
-        // A. Create Company Ledger Entry (The visible cash change)
-        const { error: ledgerError } = await supabase.from('customer_ledgers').insert({
-            tenant_id: tenantId,
-            amount: amount,
-            transaction_type: dbTransactionType, // 'credit' or 'debit'
-            category: category,                  // Specific category (e.g. 'Customer Payment')
-            description: description,
-            created_by: user.id, // Changed from admin_id
-            created_at: dateStr || new Date().toISOString()
-        });
+        // --- ATOMIC TRANSACTION VIA RPC ---
+        // If it's a customer payment (credit), use the RPC.
+        // If it's a generic expense/income not linked to a customer, we might need a different handling or generic ledger insert.
+        // GUIDANCE: For now, if customerId is present, we use the atomic RPC.
 
-        if (ledgerError) throw new Error(`Ledger Error: ${ledgerError.message}`);
-
-        // B. Handle Customer Linkage (If Payment)
         if (category === 'customer_payment' && customerId) {
-
-            // 1. Credit the Customer (Decrease Debt)
-            // Fetch current balance first to be safe (or use RPC increment if available, but simple update is fine for low concurrency)
-            const { data: customer } = await supabase.from('customers').select('current_balance').eq('id', customerId).single();
-            const currentBalance = customer?.current_balance || 0;
-
-            // Payment reduces the balance (Debt - Payment)
-            // Amount here is POSITIVE because we parsed it as such, but wait...
-            // In the "Type" check above, income remains Positive.
-            // So if Customer Pays 5000:
-            // Ledger: +5000 (Income)
-            // Customer Balance: Old - 5000
-
-            // We need the absolute value for the customer calculation
-            const absAmount = Math.abs(amount);
-            const newBalance = currentBalance - absAmount;
-
-            await supabase.from('customers')
-                .update({ current_balance: newBalance })
-                .eq('id', customerId)
-                .eq('tenant_id', tenantId);
-
-            // 2. Add to Customer History (Transactions Table)
-            // This is crucial for the customer to see "Payment Received"
-            await supabase.from('transactions').insert({
-                tenant_id: tenantId,
-                customer_id: customerId,
-                amount: -absAmount, // Credit is Negative in Transactions table usually (reduces debt)
-                type: 'payment',
-                payment_method: 'cash', // Assumed cash since it's "Manual Finance Entry"
-                description: description || 'Direct Payment at Office',
-                created_at: dateStr || new Date().toISOString()
+            const { error: rpcError } = await supabase.rpc('process_customer_payment', {
+                p_tenant_id: tenantId,
+                p_customer_id: customerId,
+                p_amount: amount, // Positive amount expected by RPC logic (it negates it for credit)
+                p_payment_method: 'cash', // Defaulting to cash for manual entry
+                p_admin_id: user.id,
+                p_description: description || 'Manual Transaction'
             });
+
+            if (rpcError) {
+                console.error("RPC Error:", rpcError);
+                return { error: `Transaction failed: ${rpcError.message}` };
+            }
+        } else {
+            // Atomic RPC for Non-Customer Transactions (Iron Law Compliance)
+            const { data: rpcData, error: rpcError } = await supabase.rpc('record_expense_transaction', {
+                p_tenant_id: tenantId,
+                p_amount: amount,
+                p_type: type, // 'income' or 'expense'
+                p_category: category || 'general',
+                p_description: description || 'Manual Entry',
+                p_user_id: user.id
+            });
+
+            if (rpcError) {
+                console.error("Expense RPC Error:", rpcError);
+                return { error: `Transaction failed: ${rpcError.message}` };
+            }
+
+            const result = rpcData as any;
+            if (!result || !result.success) {
+                return { error: result?.message || "Transaction failed" };
+            }
         }
 
         revalidatePath('/admin/finance');

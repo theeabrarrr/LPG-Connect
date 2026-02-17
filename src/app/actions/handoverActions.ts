@@ -1,7 +1,7 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
-import { getCurrentUserTenantId } from '@/lib/utils/tenantHelper'
+import { createClient } from '@/utils/supabase/server'
+import { getCurrentUserTenantId, getCurrentUser } from '@/lib/utils/tenantHelper'
 import { revalidatePath } from 'next/cache'
 
 interface HandoverFilters {
@@ -19,7 +19,9 @@ export async function getPendingHandovers() {
 
   let tenantId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    const id = await getCurrentUserTenantId()
+    if (!id) throw new Error('No tenant found')
+    tenantId = id
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
@@ -48,7 +50,9 @@ export async function getHandoverById(handoverId: string) {
 
   let tenantId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    const id = await getCurrentUserTenantId()
+    if (!id) throw new Error('No tenant found')
+    tenantId = id
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
@@ -70,86 +74,36 @@ export async function getHandoverById(handoverId: string) {
 
 /**
  * Approve a handover
- * This should ideally involve a Postgres function for atomicity for wallet updates.
+ * USES ATOMIC RPC: execute_handover_approval
  */
 export async function approveHandover(handoverId: string) {
   const supabase = await createClient()
 
   let tenantId: string
+  let adminId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    const user = await getCurrentUser()
+    if (!user) throw new Error('User not authenticated')
+    tenantId = user.tenant_id
+    adminId = user.id
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
 
-  const { data: handover, error: fetchError } = await supabase
-    .from('handover_logs')
-    .select('id, amount, sender_id, tenant_id')
-    .eq('id', handoverId)
-    .eq('tenant_id', tenantId)
-    .single()
+  // --- ATOMIC TRANSACTION VIA RPC ---
+  const { error } = await supabase.rpc('execute_handover_approval', {
+    p_handover_id: handoverId,
+    p_admin_id: adminId
+  })
 
-  if (fetchError || !handover) {
-    return { success: false, error: 'Handover not found or access denied' }
+  if (error) {
+    console.error('Error approving handover (RPC):', error)
+    return { success: false, error: `Approval failed: ${error.message}` }
   }
-
-  // --- Start Atomic DB Transaction (ideally via RPC) ---
-  // For now, simulating with sequential updates. Real app should use an RPC.
-  // Example RPC: approve_driver_handover(p_handover_id, p_admin_id)
-
-  const { error: updateHandoverError } = await supabase
-    .from('handover_logs')
-    .update({ status: 'verified' })
-    .eq('id', handoverId)
-    .eq('tenant_id', tenantId)
-
-  if (updateHandoverError) {
-    console.error('Error updating handover status:', updateHandoverError)
-    return { success: false, error: 'Failed to update handover status' }
-  }
-
-  // Update sender's (driver's) employee wallet
-  const { error: updateWalletError } = await supabase
-    .from('employee_wallets')
-    .update({ balance: -handover.amount }) // Subtract handed over cash from driver's wallet
-    .eq('user_id', handover.sender_id)
-    .eq('tenant_id', tenantId)
-
-  if (updateWalletError) {
-    console.error('Error updating employee wallet:', updateWalletError)
-    // IMPORTANT: In a real scenario, this would rollback the handover status update
-    return { success: false, error: 'Failed to update driver wallet' }
-  }
-
-  // Insert entry into cash_book_entries for the company's treasury
-  const { data: currentUser, error: userError } = await getCurrentUser(); // Get current user for created_by
-  if (userError || !currentUser) {
-      console.error('Error getting current user:', userError);
-      return { success: false, error: 'Failed to get current user for cash book entry' };
-  }
-
-  const { error: cashBookError } = await supabase
-    .from('cash_book_entries')
-    .insert({
-      tenant_id: tenantId,
-      amount: handover.amount,
-      transaction_type: 'cash_in', // Or 'driver_deposit' as per GAP_ANALYSIS
-      description: `Cash handover from ${currentUser.full_name} (${handover.sender_id})`,
-      reference_id: handover.id,
-      created_by: currentUser.id
-    })
-  
-  if (cashBookError) {
-    console.error('Error adding cash book entry:', cashBookError)
-    // IMPORTANT: In a real scenario, this would rollback previous updates
-    return { success: false, error: 'Failed to add cash book entry' }
-  }
-
-  // --- End Atomic DB Transaction ---
 
   revalidatePath('/admin/handovers')
   revalidatePath('/admin/finance')
-  return { success: true, message: 'Handover approved successfully' }
+  return { success: true, message: 'Handover approved successfully (Atomic)' }
 }
 
 /**
@@ -160,7 +114,9 @@ export async function rejectHandover(handoverId: string, reason: string) {
 
   let tenantId: string
   try {
-    tenantId = await getCurrentUserTenantId()
+    const id = await getCurrentUserTenantId()
+    if (!id) throw new Error('No tenant found')
+    tenantId = id
   } catch (error) {
     return { success: false, error: 'Authentication required' }
   }
@@ -215,7 +171,7 @@ export async function initiateHandover(amount: number) {
     .eq('user_id', userId)
     .eq('tenant_id', tenantId)
     .single()
-  
+
   if (walletError || !wallet) {
     return { success: false, error: 'Driver wallet not found' }
   }
@@ -265,8 +221,8 @@ export async function getHandoverHistory(filters?: HandoverFilters) {
     .select('*, sender:profiles(full_name), receiver:profiles(full_name)')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
-  
-  if(filters?.status) {
+
+  if (filters?.status) {
     query = query.eq('status', filters.status);
   }
 

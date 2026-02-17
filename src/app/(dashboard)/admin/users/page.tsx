@@ -6,10 +6,11 @@ import { createEmployee } from '@/app/actions/createEmployee';
 import { updateUser, resetPassword, toggleUserStatus, getStaffUsers } from '@/app/actions/manageUser';
 import {
     Users, UserPlus, Search, Phone, Shield, Loader2, X,
-    Briefcase, Truck, MoreVertical, Edit, Lock, Ban, MailIcon
+    Briefcase, Truck, MoreVertical, Edit, Lock, Ban, MailIcon, BarChart2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClient } from '@/utils/supabase/client';
+import DriverAnalyticsModal from '@/components/admin/users/DriverAnalyticsModal';
 
 // --- Types ---
 interface Employee {
@@ -44,6 +45,7 @@ export default function UsersPage() {
     // Action Modals
     const [resettingUser, setResettingUser] = useState<Employee | null>(null);
     const [deactivatingUser, setDeactivatingUser] = useState<Employee | null>(null);
+    const [analyticsUser, setAnalyticsUser] = useState<Employee | null>(null);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -315,6 +317,11 @@ export default function UsersPage() {
                                             </td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className="flex items-center justify-end gap-2">
+                                                    {emp.role === 'driver' && (
+                                                        <button onClick={() => setAnalyticsUser(emp)} className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="Performance Analytics">
+                                                            <BarChart2 size={16} />
+                                                        </button>
+                                                    )}
                                                     <button onClick={() => openEditModal(emp)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
                                                         <Edit size={16} />
                                                     </button>
@@ -453,6 +460,15 @@ export default function UsersPage() {
                         </div>
                     </div>
                 </Modal>
+            )}
+
+            {/* ANALYTICS MODAL */}
+            {analyticsUser && (
+                <DriverAnalyticsModal
+                    driverId={analyticsUser.id}
+                    driverName={analyticsUser.name || 'Driver'}
+                    onClose={() => setAnalyticsUser(null)}
+                />
             )}
         </div>
     );
