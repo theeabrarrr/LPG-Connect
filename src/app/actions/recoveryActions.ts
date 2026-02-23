@@ -27,10 +27,10 @@ export async function getRecoveryStats() {
 
     // 2. Get Pending Handovers (Money in transit)
     const { data: pendingTxns } = await supabase
-        .from('transactions')
+        .from('cash_book_entries')
         .select('id, amount, created_at, status')
-        .eq('user_id', user.id)
-        .eq('type', 'handover_request')
+        .eq('created_by', user.id)
+        .eq('category', 'handover_request')
         .eq('status', 'pending');
 
     const pendingAmount = pendingTxns?.reduce((acc, curr) => acc + (curr.amount || 0), 0) || 0;
@@ -116,67 +116,40 @@ export async function collectPayment(formData: FormData) {
         // B. SPLIT LOGIC
         // SCENARIO 1: CASH (Immediate Settlement)
         if (paymentMode === 'cash') {
-            // 1. Credit Customer (Reduce Debt)
-            const { data: cust } = await supabase
-                .from('customers')
-                .select('current_balance, name')
-                .eq('id', customerId)
-                .single();
-
-            if (!cust) return { error: "Customer not found" };
-
-            const newBalance = (cust.current_balance || 0) - amount;
-
-            await supabase
-                .from('customers')
-                .update({ current_balance: newBalance })
-                .eq('id', customerId);
-
-            // 2. Increase Agent Liability (Wallet)
-            const { data: w } = await supabase.from('employee_wallets').select('balance').eq('user_id', user.id).single();
-            const currentWallet = w?.balance || 0;
-
-            await supabase.from('employee_wallets').upsert({
-                user_id: user.id,
-                balance: currentWallet + amount,
-                updated_at: new Date().toISOString(),
-                tenant_id: tenantId
-            }, { onConflict: 'user_id' });
-
-            // 3. Log Transaction (Completed)
-            const { error: txnError } = await supabase.from('transactions').insert({
-                tenant_id: tenantId,
-                user_id: user.id,
-                customer_id: customerId,
-                type: 'collection',
-                status: 'collected_cash',
-                amount: -amount, // Debt reduction is negative
-                payment_method: paymentMode,
-                description: description || `Cash Collection from ${cust.name}`,
-                proof_url: proofUrl,
-                created_at: new Date().toISOString()
+            const { error: rpcError } = await supabase.rpc('collect_payment_with_ledger', {
+                p_tenant_id: tenantId,
+                p_customer_id: customerId,
+                p_amount: amount,
+                p_payment_mode: paymentMode,
+                p_description: description || `Cash Collection`,
+                p_proof_url: proofUrl,
+                p_user_id: user.id
             });
 
-            if (txnError) throw new Error(`Txn Error: ${txnError.message}`);
+            if (rpcError) {
+                console.error("Payment RPC Error:", rpcError);
+                throw new Error(`Transaction failed: ${rpcError.message}`);
+            }
 
         } else {
             // SCENARIO 2: BANK / ONLINE (Pending Verification)
             // NO Customer Update, NO Wallet Update. Just Transaction Log.
 
-            const { error: txnError } = await supabase.from('transactions').insert({
+            const { error: txnError } = await supabase.from('cash_book_entries').insert({
                 tenant_id: tenantId,
-                user_id: user.id,
+                created_by: user.id,
                 customer_id: customerId,
-                type: 'collection',
+                transaction_type: 'cash_in',
+                category: 'collection',
                 status: 'pending_verification', // CRITICAL: Needs Admin Approval
-                amount: -amount,
+                amount: amount, // Keeping positive for cash flow consistency
                 payment_method: paymentMode,
                 description: description || `Online Payment Claim`,
                 proof_url: proofUrl,
                 created_at: new Date().toISOString()
             });
 
-            if (txnError) throw new Error(`Txn Error: ${txnError.message}`);
+            if (txnError) throw new Error(`Cash Book Error: ${txnError.message}`);
         }
 
         revalidatePath('/recovery');
@@ -215,11 +188,12 @@ export async function processRecoveryHandover(formData: FormData) {
 
     // Create Handover Request
     // This puts it in 'pending' state. Valid Money is still in Agent Wallet until Admin Approves.
-    const { error } = await supabase.from('transactions').insert({
+    const { error } = await supabase.from('cash_book_entries').insert({
         tenant_id: tenantId,
-        user_id: user.id,
+        created_by: user.id,
         receiver_id: receiverId,
-        type: 'handover_request',
+        transaction_type: 'cash_in',
+        category: 'handover_request',
         status: 'pending',
         amount: amount,
         payment_method: 'cash',
@@ -259,11 +233,11 @@ export async function getAgentHistory() {
     const tenantId = user.app_metadata?.tenant_id;
 
     const { data } = await supabase
-        .from('transactions')
-        .select('id, type, amount, status, created_at, description, proof_url, customers(name), receiver_id')
-        .eq('user_id', user.id)
+        .from('cash_book_entries')
+        .select('id, category as type, amount, status, created_at, description, proof_url, customers(name), receiver_id')
+        .eq('created_by', user.id)
         .eq('tenant_id', tenantId)
-        .in('type', ['collection', 'handover_request'])
+        .in('category', ['collection', 'handover_request'])
         .order('created_at', { ascending: false })
         .limit(50);
 

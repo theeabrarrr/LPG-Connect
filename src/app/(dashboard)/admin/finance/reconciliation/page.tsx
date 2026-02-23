@@ -63,10 +63,10 @@ export default function ReconciliationPage() {
         loadData();
     }, []);
 
-    const handleFix = async (customerId: string, correctBalance: number) => {
+    const handleFix = async (customerId: string) => {
         setFixing(customerId);
         try {
-            const res = await fixCustomerBalance(customerId, correctBalance);
+            const res = await fixCustomerBalance(customerId);
             if (res.success) {
                 toast.success("Balance corrected successfully");
                 // Remove from local state
@@ -256,7 +256,7 @@ export default function ReconciliationPage() {
                                         <TableCell className="text-right">
                                             <Button
                                                 size="sm"
-                                                onClick={() => handleFix(item.customerId, item.realBalance)}
+                                                onClick={() => handleFix(item.customerId)}
                                                 disabled={fixing === item.customerId}
                                                 className="bg-indigo-600 hover:bg-indigo-700"
                                             >

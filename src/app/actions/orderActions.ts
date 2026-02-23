@@ -12,6 +12,9 @@ export async function getOrders(filters?: {
     endDate?: string;
     status?: string;
     driverId?: string;
+    minAmount?: string;
+    maxAmount?: string;
+    paymentMode?: string;
 }) {
     const supabase = await createClient();
 
@@ -46,6 +49,9 @@ export async function getOrders(filters?: {
         }
         if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
         if (filters.driverId && filters.driverId !== 'all') query = query.eq('driver_id', filters.driverId);
+        if (filters.paymentMode && filters.paymentMode !== 'all') query = query.eq('payment_method', filters.paymentMode);
+        if (filters.minAmount) query = query.gte('total_amount', parseFloat(filters.minAmount));
+        if (filters.maxAmount) query = query.lte('total_amount', parseFloat(filters.maxAmount));
     }
 
     const { data, error } = await query;
@@ -152,70 +158,72 @@ export async function createOrder(prevState: any, formData: FormData) {
         assignedSerials = autoStock.map(c => c.serial_number);
     }
 
-    // 2. Perform Updates
-    // A. Create Order
-    const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-            tenant_id: tenantId,
-            customer_id: customerId,
-            driver_id: finalDriverId, // Can be null
-            cylinders_count: cylindersCount,
-            total_amount: totalAmount,
-            status: isUnassigned ? 'pending' : 'assigned', // Pending if no driver
-            payment_method: 'pending',
-            created_by: user.id
-        })
-        .select()
-        .single();
+    // 2. Perform Atomic Order Creation via RPC
+    const { data: orderId, error: rpcError } = await supabase.rpc('create_order_with_ledger', {
+        p_tenant_id: tenantId,
+        p_customer_id: customerId,
+        p_driver_id: finalDriverId,
+        p_cylinders_count: cylindersCount,
+        p_total_amount: totalAmount,
+        p_status: isUnassigned ? 'pending' : 'assigned',
+        p_created_by: user.id,
+        p_product_name: productName,
+        p_price: price,
+        p_cylinder_ids: targetCylinderIds,
+        p_is_unassigned: isUnassigned
+    });
 
-    if (orderError) {
-        console.error("Create Order Error:", orderError);
+    if (rpcError) {
+        console.error("Create Order RPC Error:", rpcError);
         return {
-            error: `Failed to create order: ${orderError.message}`,
-            details: orderError.details,
-            hint: orderError.hint
+            error: `Failed to create order: ${rpcError.message}`,
+            details: (rpcError as any).details,
+            hint: (rpcError as any).hint
         };
     }
 
-    // B. Create Order Items
-    const { error: itemError } = await supabase.from('order_items').insert({
-        order_id: order.id,
-        product_name: productName,
-        quantity: cylindersCount,
-        price: price
+    revalidatePath("/admin/orders");
+    return { success: true, orderId: orderId, assignedSerials };
+}
+
+/**
+ * 4. SECURE BULK ASSIGN ORDERS
+ * Uses the atomic Postgres RPC: bulk_assign_orders
+ */
+export async function bulkAssignOrders(orderIds: string[], driverId: string) {
+    const supabase = await createClient();
+
+    // 1. Session & Metadata
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return { success: false, error: "Authentication required" };
+
+    const tenantId = user.app_metadata?.tenant_id;
+    if (!tenantId) {
+        console.error("CRITICAL: Tenant ID missing in bulkAssignOrders");
+        return { success: false, error: "Unauthorized: Tenant Context Missing" };
+    }
+
+    if (!orderIds || orderIds.length === 0) {
+        return { success: false, error: "No orders selected for assignment." };
+    }
+
+    if (!driverId) {
+        return { success: false, error: "Driver must be explicitly selected." };
+    }
+
+    // 2. Execute Atomic RPC
+    const { data, error } = await supabase.rpc('bulk_assign_orders', {
+        p_order_ids: orderIds,
+        p_driver_id: driverId,
+        p_tenant_id: tenantId
     });
 
-    if (itemError) {
-        console.error("Create Item Error:", itemError);
+    if (error) {
+        console.error("Bulk Assignment Failed:", error);
+        return { success: false, error: error.message || "Failed to assign orders. Check driver capacity." };
     }
 
-    // C. Update Cylinders (Assign to Driver OR Reserve)
-    const cylinderUpdate = isUnassigned ? {
-        status: 'reserved',
-        current_location_type: 'warehouse',
-        current_holder_id: null,
-        last_order_id: order.id,
-        updated_at: new Date().toISOString()
-    } : {
-        status: 'full', // Already full
-        current_location_type: 'driver',
-        current_holder_id: finalDriverId,
-        last_order_id: order.id,
-        updated_at: new Date().toISOString()
-    };
-
-    const { error: cylinderError } = await supabase
-        .from('cylinders')
-        .update(cylinderUpdate)
-        .in('id', targetCylinderIds)
-        .eq('tenant_id', tenantId);
-
-    if (cylinderError) {
-        console.error("Cylinder Update Error:", cylinderError);
-        return { error: "Order created but asset assignment failed. Please check system logs." };
-    }
-
+    // 3. Clear Cache
     revalidatePath("/admin/orders");
-    return { success: true, orderId: order.id, assignedSerials };
+    return { success: true, data };
 }

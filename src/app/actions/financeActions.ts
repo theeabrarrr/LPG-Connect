@@ -335,19 +335,23 @@ export async function getReconciliationReport() {
     // For Production: Use a Postgres RPC for this aggregation!
     // RPC Name Idea: `get_customer_ledger_sums(tenant_id)`
 
-    const { data: txns, error: txnError } = await supabase
-        .from('transactions')
-        .select('customer_id, amount')
+    const { data: ledgers, error: ledgerError } = await supabase
+        .from('customer_ledgers')
+        .select('customer_id, amount, transaction_type')
         .eq('tenant_id', tenantId);
 
-    if (txnError) return { success: false, error: txnError.message };
+    if (ledgerError) return { success: false, error: ledgerError.message };
 
     // 3. Aggregate in JS
     const realBalances: Record<string, number> = {};
 
-    txns.forEach(t => {
-        if (!realBalances[t.customer_id]) realBalances[t.customer_id] = 0;
-        realBalances[t.customer_id] += (t.amount || 0);
+    ledgers.forEach(l => {
+        if (!realBalances[l.customer_id]) realBalances[l.customer_id] = 0;
+        if (l.transaction_type === 'debit' || l.transaction_type === 'opening_balance') {
+            realBalances[l.customer_id] += (l.amount || 0);
+        } else if (l.transaction_type === 'credit') {
+            realBalances[l.customer_id] -= (l.amount || 0);
+        }
     });
 
     // 4. Compare & Find Discrepancies
@@ -387,8 +391,10 @@ export async function getReconciliationReport() {
 }
 
 // 9. FIX BALANCE (One-Click Repair)
-export async function fixCustomerBalance(customerId: string, correctBalance: number) {
+export async function fixCustomerBalance(customerId: string) {
     const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Authentication required' };
 
     let tenantId: string;
     try {
@@ -399,15 +405,12 @@ export async function fixCustomerBalance(customerId: string, correctBalance: num
         return { success: false, error: 'Authentication required' };
     }
 
-    // Update
-    const { error } = await supabase
-        .from('customers')
-        .update({
-            current_balance: correctBalance,
-            updated_at: new Date().toISOString()
-        })
-        .eq('id', customerId)
-        .eq('tenant_id', tenantId);
+    // Update via Atomic RPC
+    const { error } = await supabase.rpc('auto_fix_ledger_discrepancy', {
+        p_tenant_id: tenantId,
+        p_customer_id: customerId,
+        p_user_id: user.id
+    });
 
     if (error) return { success: false, error: error.message };
 

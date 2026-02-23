@@ -997,6 +997,70 @@ export async function approveExpense(expenseId: string) {
 
 ---
 
+## PHASE 1.5: PRD SYNC LOGIC GAPS (CRITICAL MISSING SCHEMAS & ACTIONS)
+**Priority:** P1 | **Duration:** 6 hours | **Completion Target:** 100%
+
+### Task 1.5.1: Add `proof_url` to Orders and Handover Logs
+**Duration:** 1 hour
+**Priority:** P0 - CRITICAL
+
+**Objective:** Fix PRD Sync DB anomalies by adding missing columns required for drop-off and cash handover verification.
+
+**Action:**
+Execute in Supabase SQL Editor:
+```sql
+ALTER TABLE public.orders ADD COLUMN proof_url text;
+ALTER TABLE public.handover_logs ADD COLUMN proof_url text;
+```
+
+**Acceptance Criteria:**
+- [x] Columns exist in the database.
+- [x] TypeScript types (`database.types.ts`) are manually or automatically re-generated to reflect changes.
+
+---
+
+### Task 1.5.2: Implement `bulkAssignOrders` Server Action
+**Duration:** 2 hours
+**Priority:** P1 - HIGH
+
+**Objective:** Fulfill PRD requirement for bulk order assignment.
+
+**Action:**
+Create or update function in `src/app/actions/orderActions.ts`:
+```typescript
+/**
+ * Bulk assign orders to a driver
+ */
+export async function bulkAssignOrders(orderIds: string[], driverId: string) {
+  // Requires tenant verification
+  // Requires transaction / RPC to update inventory atomically
+}
+```
+
+**Acceptance Criteria:**
+- [x] Function is tenant-scoped
+- [x] Inventory decreases atomically based on cylinder count
+- [x] Driver is assigned to all orders
+- [x] Status changes to 'confirmed' or 'assigned'
+
+---
+
+### Task 1.5.3: Implement `checkInventoryAlerts` System
+**Duration:** 2 hours
+**Priority:** P1 - HIGH
+
+**Objective:** Fulfill PRD requirement for stock and aging cylinder alerts.
+
+**Action:**
+Create utility in `src/lib/utils/alertSystem.ts` containing functions for low stock and aging alerts.
+
+**Acceptance Criteria:**
+- [x] Aging cylinders detected (> 30 days old) and aggregated by customer/driver
+- [x] Low stock alerts triggered dynamically via `organization_settings` (Effective Stock)
+- [x] Driver hoarding alert logic stubbed
+
+---
+
 ## PHASE 2: FINANCIAL REPORTING MODULE (Week 1, Days 3-5)
 **Priority:** P0 | **Duration:** 18 hours | **Completion Target:** 100%
 
@@ -1908,13 +1972,18 @@ import { generateSalesReportPDF, generateMonthlyReportPDF, generateOutstandingBa
 ---
 
 ## PHASE 4: LEDGER RECONCILIATION (Week 2, Days 2-3)
-**Priority:** P0 | **Duration:** 14 hours | **Completion Target:** 97%
+**Priority:** P0 | **Duration:** 14 hours | **Completion Target:** 100%
 
 ### Task 4.1: Create Postgres Transaction Function for Orders (3 hours)
+**Status:** [✓] Complete
 ### Task 4.2: Update Order Actions to Use Transactions (3 hours)
+**Status:** [✓] Complete
 ### Task 4.3: Build Reconciliation Tool UI (4 hours)
+**Status:** [✓] Complete
 ### Task 4.4: Implement Auto-fix for Missing Entries (2 hours)
+**Status:** [✓] Complete
 ### Task 4.5: Add Reconciliation Report Export (2 hours)
+**Status:** [✓] Complete
 
 ---
 
@@ -1922,11 +1991,16 @@ import { generateSalesReportPDF, generateMonthlyReportPDF, generateOutstandingBa
 **Priority:** P0 | **Duration:** 20 hours | **Completion Target:** 100%
 
 ### Task 5.1: Create Tenants Table Migration (1 hour)
+**Status:** [✓] Complete
 ### Task 5.2: Create Tenant CRUD Actions (4 hours)
+**Status:** [✓] Complete
 ### Task 5.3: Build Tenant Management Dashboard (6 hours)
+**Status:** [✓] Complete
 ### Task 5.4: Implement Tenant Onboarding Flow (4 hours)
+**Status:** [✓] Complete
 ### Task 5.5: Add Tenant Billing Tracker (3 hours)
 ### Task 5.6: Build Platform Analytics Dashboard (2 hours)
+**Status:** [✓] Complete
 
 ---
 
@@ -1939,11 +2013,11 @@ import { generateSalesReportPDF, generateMonthlyReportPDF, generateOutstandingBa
 - [x] Inventory alerts (8h)
 - [x] Driver analytics (12h)
 
-**PHASE 7: Testing & QA (Week 3-4) - 40 hours**
+**PHASE 7: Testing & QA**
 - Unit tests (30 hours)
 - Integration tests (10 hours)
 
-**PHASE 8: Polish & Documentation (Week 4) - 20 hours**
+**PHASE 8: Polish & Documentation**
 - Documentation writing
 - UI polish
 - Bug fixes

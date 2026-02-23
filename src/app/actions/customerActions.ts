@@ -11,7 +11,10 @@ export async function getCustomers(
     page: number = 1,
     limit: number = 20,
     search: string = '',
-    status: 'all' | 'active' | 'inactive' = 'all'
+    status: 'all' | 'active' | 'inactive' = 'all',
+    filters?: {
+        balanceStatus?: 'all' | 'positive' | 'negative' | 'zero';
+    }
 ) {
     const supabase = await createClient();
 
@@ -40,6 +43,12 @@ export async function getCustomers(
     if (status !== 'all') {
         const isActive = status === 'active';
         query = query.eq('is_active', isActive);
+    }
+
+    if (filters?.balanceStatus && filters.balanceStatus !== 'all') {
+        if (filters.balanceStatus === 'positive') query = query.gt('current_balance', 0);
+        else if (filters.balanceStatus === 'negative') query = query.lt('current_balance', 0);
+        else if (filters.balanceStatus === 'zero') query = query.eq('current_balance', 0);
     }
 
     // 4. Pagination
@@ -167,22 +176,26 @@ export async function createCustomer(prevState: any, formData: FormData) {
     // We do this silently. If it fails, the customer is still created (Non-atomic for now, but acceptable)
     try {
         if (openingBalance !== 0) {
-            await supabase.from("transactions").insert({
+            await supabase.from("customer_ledgers").insert({
                 tenant_id: tenantId,
                 customer_id: newCustomer.id,
-                amount: openingBalance, // Preserves sign
-                type: 'opening_balance', // Ensure this enum exists or use 'adjustment'
-                description: 'Opening Balance Brought Forward'
+                amount: Math.abs(openingBalance),
+                transaction_type: openingBalance > 0 ? 'debit' : 'credit',
+                category: 'opening_balance',
+                description: 'Opening Balance Brought Forward',
+                created_by: user.id
             });
         }
 
         if (securityDeposit > 0) {
-            await supabase.from("transactions").insert({
+            await supabase.from("customer_ledgers").insert({
                 tenant_id: tenantId,
                 customer_id: newCustomer.id,
-                amount: -securityDeposit, // Credit (Negative)
-                type: 'security_deposit', // Ensure this enum exists or use 'adjustment'
-                description: 'Security Deposit (Cylinders)'
+                amount: securityDeposit,
+                transaction_type: 'credit',
+                category: 'security_deposit',
+                description: 'Security Deposit (Cylinders)',
+                created_by: user.id
             });
         }
     } catch (txError) {
@@ -313,7 +326,7 @@ export async function getCustomerTransactions(id: string) {
     if (!tenantId) return [];
 
     const { data, error } = await supabase
-        .from("transactions")
+        .from("customer_ledgers")
         .select("*")
         .eq("customer_id", id)
         .eq("tenant_id", tenantId)

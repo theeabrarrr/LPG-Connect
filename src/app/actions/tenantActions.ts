@@ -19,7 +19,7 @@ const supabaseAdmin = createClient(
 /**
  * Check if current user is Super Admin
  */
-async function checkSuperAdmin() {
+export async function checkSuperAdmin() {
     const supabase = await createServerClient();
     const { data: { user }, error } = await supabase.auth.getUser();
 

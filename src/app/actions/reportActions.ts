@@ -33,18 +33,53 @@ export async function generateDailySalesReport(date: string) {
     return { success: false, error: ordersError.message }
   }
 
+  // Get org settings for unit cost
+  const { data: settings } = await supabase
+    .from('organization_settings')
+    .select('default_unit_cost')
+    .eq('tenant_id', tenantId)
+    .single()
+  const unitCost = settings?.default_unit_cost || 0
+
   // Calculate metrics
   const totalOrders = orders.length
-  const completedOrders = orders.filter(o => o.status === 'completed').length
-  const totalRevenue = orders
-    .filter(o => o.status === 'completed')
-    .reduce((sum, o) => sum + (o.total_amount || 0), 0) // Changed to total_amount
-  const cashCollected = orders
-    .filter(o => o.payment_method === 'cash' && o.status === 'completed') // Changed to payment_method
-    .reduce((sum, o) => sum + (o.total_amount || 0), 0) // Changed to total_amount
-  const onlinePayments = orders
-    .filter(o => o.payment_method === 'online' && o.status === 'completed') // Changed to payment_method, assuming 'online' payment method
-    .reduce((sum, o) => sum + (o.total_amount || 0), 0) // Changed to total_amount
+  const completedOrders = orders.filter(o => o.status === 'completed' || o.status === 'delivered').length
+
+  let totalRevenue = 0;
+  let totalCoGS = 0;
+
+  orders.forEach(o => {
+    if (o.status === 'completed' || o.status === 'delivered') {
+      totalRevenue += (o.total_amount || 0);
+
+      let qty = 0;
+      o.order_items?.forEach((item: any) => qty += (item.quantity || 0));
+      totalCoGS += (qty * unitCost);
+    }
+  })
+
+  // Get cash flow from cash_book_entries instead of interpreting orders
+  const { data: cashEntries, error: cashError } = await supabase
+    .from('cash_book_entries')
+    .select('amount, transaction_type, category')
+    .eq('tenant_id', tenantId)
+    .gte('created_at', `${date}T00:00:00`)
+    .lte('created_at', `${date}T23:59:59`)
+
+  let cashCollected = 0
+  let onlinePayments = 0 // Using cash_book_entries to track actual physical vs digital might require category checks
+
+  if (!cashError && cashEntries) {
+    cashCollected = cashEntries
+      .filter(e => e.transaction_type === 'cash_in' && e.category === 'customer_payment_verified')
+      .reduce((sum, e) => sum + (e.amount || 0), 0)
+
+    // Note: If online payments are explicitly 'cash_in' but separate category, adjust here. 
+    // For now, physical cash collection (from recoveries/handovers) would be tracked here better as well.
+    cashCollected = cashEntries
+      .filter(e => e.transaction_type === 'cash_in')
+      .reduce((sum, e) => sum + (e.amount || 0), 0)
+  }
 
   // Get expenses for the day
   const { data: expenses, error: expensesError } = await supabase
@@ -68,7 +103,8 @@ export async function generateDailySalesReport(date: string) {
       cashCollected,
       onlinePayments,
       totalExpenses,
-      netProfit: totalRevenue - totalExpenses,
+      totalCoGS,
+      netProfit: totalRevenue - totalExpenses - totalCoGS, // Accrual net profit
       orders
     }
   }
@@ -91,16 +127,32 @@ export async function generateMonthlySummary(yearMonth: string) {
   const startDate = `${yearMonth}-01`
   const endDate = `${yearMonth}-31`
 
+  // Get org settings for unit cost
+  const { data: settings } = await supabase
+    .from('organization_settings')
+    .select('default_unit_cost')
+    .eq('tenant_id', tenantId)
+    .single()
+  const unitCost = settings?.default_unit_cost || 0
+
   // Revenue from completed orders
   const { data: orders, error: ordersError } = await supabase
     .from('orders')
-    .select('total_amount, created_at, status') // Changed to total_amount
+    .select('total_amount, created_at, status, order_items(quantity)') // Fetch order_items for CoGS
     .eq('tenant_id', tenantId)
-    .eq('status', 'completed')
+    .in('status', ['completed', 'delivered'])
     .gte('created_at', startDate)
     .lte('created_at', endDate)
 
-  const totalRevenue = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0 // Changed to total_amount
+  let totalRevenue = 0;
+  let totalCoGS = 0;
+
+  orders?.forEach(o => {
+    totalRevenue += (o.total_amount || 0);
+    let qty = 0;
+    o.order_items?.forEach((item: any) => qty += (item.quantity || 0));
+    totalCoGS += (qty * unitCost);
+  })
 
   // Expenses
   const { data: expenses, error: expensesError } = await supabase
@@ -126,8 +178,9 @@ export async function generateMonthlySummary(yearMonth: string) {
       month: yearMonth,
       totalRevenue,
       totalExpenses,
-      netProfit: totalRevenue - totalExpenses,
-      profitMargin: totalRevenue > 0 ? ((totalRevenue - totalExpenses) / totalRevenue) * 100 : 0,
+      totalCoGS,
+      netProfit: totalRevenue - totalExpenses - totalCoGS,
+      profitMargin: totalRevenue > 0 ? ((totalRevenue - totalExpenses - totalCoGS) / totalRevenue) * 100 : 0,
       totalOrders: orders?.length || 0,
       expensesByCategory
     }
@@ -147,16 +200,32 @@ export async function generateProfitLossStatement(dateRange: DateRange) {
     return { success: false, error: 'Authentication required' }
   }
 
+  // Get org settings for unit cost
+  const { data: settings } = await supabase
+    .from('organization_settings')
+    .select('default_unit_cost')
+    .eq('tenant_id', tenantId)
+    .single()
+  const unitCost = settings?.default_unit_cost || 0
+
   // Revenue
   const { data: orders } = await supabase
     .from('orders')
-    .select('total_amount') // Changed to total_amount
+    .select('total_amount, order_items(quantity)') // Updated for CoGS
     .eq('tenant_id', tenantId)
-    .eq('status', 'completed')
+    .in('status', ['completed', 'delivered'])
     .gte('created_at', dateRange.startDate)
     .lte('created_at', dateRange.endDate)
 
-  const totalRevenue = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0 // Changed to total_amount
+  let totalRevenue = 0;
+  let totalCoGS = 0;
+
+  orders?.forEach(o => {
+    totalRevenue += (o.total_amount || 0);
+    let qty = 0;
+    o.order_items?.forEach((item: any) => qty += (item.quantity || 0));
+    totalCoGS += (qty * unitCost);
+  })
 
   // Expenses by category
   const { data: expenses } = await supabase
@@ -175,11 +244,11 @@ export async function generateProfitLossStatement(dateRange: DateRange) {
 
   const totalExpenses = Object.values(expensesByCategory).reduce((sum, val) => sum + val, 0)
 
-  // Calculate EBITDA (simplified for LPG business)
-  const grossProfit = totalRevenue - (expensesByCategory['Cost of Goods'] || 0)
-  const operatingExpenses = (expensesByCategory['Operational'] || 0) + (expensesByCategory['Fuel'] || 0)
-  const EBITDA = grossProfit - operatingExpenses
-  const netProfit = totalRevenue - totalExpenses
+  // Calculate EBITDA
+  const grossProfit = totalRevenue - totalCoGS
+  const operatingExpenses = (expensesByCategory['Operational'] || 0) + (expensesByCategory['Fuel'] || 0) + totalExpenses // Explicit split if needed
+  const EBITDA = grossProfit - totalExpenses
+  const netProfit = totalRevenue - totalExpenses - totalCoGS
 
   return {
     success: true,
@@ -190,7 +259,8 @@ export async function generateProfitLossStatement(dateRange: DateRange) {
       },
       expenses: {
         byCategory: expensesByCategory,
-        totalExpenses
+        totalExpenses,
+        totalCoGS
       },
       profitability: {
         grossProfit,

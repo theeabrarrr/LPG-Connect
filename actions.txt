@@ -1,0 +1,102 @@
+﻿adminActions.ts:21: export async function getTenantInfo() {
+adminActions.ts:44: export async function getTenantUsers() {
+adminActions.ts:85: export async function getDrivers() {
+adminActions.ts:111: export async function getPendingHandovers() {
+adminActions.ts:147: export async function getPendingCylinderDetails() {
+adminActions.ts:166: export async function approveHandover(transactionId: string, _confirmedQty?: number) {
+adminActions.ts:200: export async function getPendingPayments() {
+adminActions.ts:227: export async function verifyPayment(transactionId: string) {
+adminActions.ts:281: export async function rejectPayment(transactionId: string) {
+adminActions.ts:299: export async function rejectHandover(transactionId: string) {
+adminActions.ts:341: export async function getDashboardStats() {
+adminActions.ts:458: export async function getRecentOrders(limit: number = 10) {
+adminActions.ts:485: export async function cancelOrder(orderId: string, reason: string) {
+adminActions.ts:518: export async function assignOrdersToDriver(orderIds: string[], driverId: string) {
+adminActions.ts:564: export async function getDriverAnalytics(driverId: string) {
+adminExpenseActions.ts:12: export async function getExpenses(statusFilter: 'pending' | 'approved' | 'rejected' = 'pending') {
+adminExpenseActions.ts:43: export async function getAllExpenses() {
+adminExpenseActions.ts:71: export async function getPendingExpenses() {
+adminExpenseActions.ts:98: export async function getExpenseStats() {
+adminExpenseActions.ts:221: export async function approveExpense(expenseId: string) {
+adminExpenseActions.ts:277: export async function rejectExpense(expenseId: string) {
+authActions.ts:5: export async function checkSystemAlreadySetup() {
+authActions.ts:27: export async function signupSuperAdmin(formData: FormData) {
+createEmployee.ts:18: export async function createEmployee(prevState: any, formData: FormData) {
+customerActions.ts:10: export async function getCustomers(
+customerActions.ts:62: export async function getCustomerStats() {
+customerActions.ts:91: export async function toggleCustomerStatus(id: string, newStatus: boolean) {
+customerActions.ts:112: export async function createCustomer(prevState: any, formData: FormData) {
+customerActions.ts:197: export async function updateCustomer(prevState: any, formData: FormData) {
+customerActions.ts:243: export async function bulkCreateCustomers(prevState: any, formData: FormData) {
+customerActions.ts:292: export async function getCustomerDetails(id: string) {
+customerActions.ts:309: export async function getCustomerTransactions(id: string) {
+customerActions.ts:325: export async function getCustomerAssets(id: string) {
+customerActions.ts:342: export async function getCustomerOrderHistory(id: string) {
+cylinderActions.ts:13: export async function getAvailableStock() {
+cylinderActions.ts:39: export async function getCylinders() {
+cylinderActions.ts:110: export async function createCylinder(prevState: any, formData: FormData) {
+cylinderActions.ts:150: export async function updateCylinderStatus(id: string, newStatus: string) {
+cylinderActions.ts:174: export async function bulkCreateCylinders(prevState: any, formData: FormData) {
+cylinderActions.ts:226: export async function sendToPlant(quantity: number) {
+cylinderActions.ts:264: export async function receiveFromPlant(quantity: number) {
+cylinderActions.ts:306: export async function updateCylinder(id: string, newSerial: string) {
+cylinderActions.ts:329: export async function deleteCylinder(id: string) {
+driverActions.ts:11: export async function getDriverInventory() {
+driverActions.ts:36: export async function getDriverOrders() {
+driverActions.ts:70: export async function startTrip(orderIds: string[]) {
+driverActions.ts:93: export async function completeDelivery(formData: FormData) {
+driverActions.ts:200: export async function getCompletedOrders(dateString?: string) {
+driverActions.ts:225: export async function getDriverStats() {
+driverActions.ts:255: export async function getDriverAllAssets() {
+driverActions.ts:272: export async function getReceivers() {
+driverActions.ts:298: export async function processHandover(formData: FormData) {
+driverActions.ts:422: export async function getDriverProfile() {
+driverExpenseActions.ts:6: export async function submitExpense(formData: FormData) {
+financeActions.ts:8: export async function getCompanyStats() {
+financeActions.ts:56: export async function getLedgerHistory() {
+financeActions.ts:92: export async function getAllCustomersClient() {
+financeActions.ts:116: export async function createTransaction(formData: FormData) {
+financeActions.ts:206: export async function getLedgerEntries(customerId: string) {
+financeActions.ts:248: export async function getCashBookEntries(filters?: { startDate?: string, endDate?: string }) {
+financeActions.ts:284: export async function getOutstandingBalances() {
+financeActions.ts:311: export async function getReconciliationReport() {
+financeActions.ts:390: export async function fixCustomerBalance(customerId: string, correctBalance: number) {
+handoverActions.ts:17: export async function getPendingHandovers() {
+handoverActions.ts:48: export async function getHandoverById(handoverId: string) {
+handoverActions.ts:79: export async function approveHandover(handoverId: string) {
+handoverActions.ts:112: export async function rejectHandover(handoverId: string, reason: string) {
+handoverActions.ts:153: export async function initiateHandover(amount: number, proofUrl: string) {
+handoverActions.ts:206: export async function getHandoverHistory(filters?: HandoverFilters) {
+manageUser.ts:26: export async function getStaffUsers() {
+manageUser.ts:60: export async function getDriverUsers() {
+manageUser.ts:91: export async function getStaffUserById(userId: string) {
+manageUser.ts:119: export async function updateStaffUser(
+manageUser.ts:173: export async function updateUser(prevState: any, formData: FormData) {
+manageUser.ts:236: export async function resetPassword(prevState: any, formData: FormData) {
+manageUser.ts:253: export async function toggleUserStatus(prevState: any, formData: FormData) {
+orderActions.ts:10: export async function getOrders(filters?: {
+orderActions.ts:62: export async function createOrder(prevState: any, formData: FormData) {
+recoveryActions.ts:12: export async function getRecoveryStats() {
+recoveryActions.ts:46: export async function getDueCustomers() {
+recoveryActions.ts:76: export async function collectPayment(formData: FormData) {
+recoveryActions.ts:192: export async function processRecoveryHandover(formData: FormData) {
+recoveryActions.ts:237: export async function getRecoveryReceivers() {
+recoveryActions.ts:254: export async function getAgentHistory() {
+reportActions.ts:14: export async function generateDailySalesReport(date: string) {
+reportActions.ts:80: export async function generateMonthlySummary(yearMonth: string) {
+reportActions.ts:140: export async function generateProfitLossStatement(dateRange: DateRange) {
+reportActions.ts:208: export async function getOutstandingBalancesReport() {
+reportActions.ts:255: export async function getDriverCommissionReport(driverId: string, dateRange: DateRange) {
+settingsActions.ts:18: export async function getSettings() {
+settingsActions.ts:38: export async function updateSettings(prevState: any, formData: FormData) {
+settingsActions.ts:72: export async function changePassword(prevState: any, formData: FormData) {
+superAdminActions.ts:9: export async function checkSuperAdmin() {
+superAdminActions.ts:40: export async function getTenants() {
+superAdminActions.ts:60: export async function createTenant(params: CreateTenantParams) {
+tenantActions.ts:41: export async function listTenants() {
+tenantActions.ts:73: export async function getTenant(id: string) {
+tenantActions.ts:94: export async function createTenant(formData: FormData) {
+tenantActions.ts:172: export async function updateTenant(id: string, updates: any) {
+tenantActions.ts:192: export async function updateSubscription(id: string, formData: FormData) {
+tenantActions.ts:221: export async function toggleTenantStatus(id: string, status: 'active' | 'suspended') {
+tenantActions.ts:228: export async function getPlatformStats() {

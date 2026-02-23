@@ -209,7 +209,6 @@ export async function updateUser(prevState: any, formData: FormData) {
             id: id,
             full_name: name,
             role: role as Database['public']['Enums']['user_role'],
-            shift: shift, // Shift is now in profiles table
             phone_number: phone,
             vehicle_number: vehicleNumber,
             tenant_id: tenantId, // Crucial for RLS

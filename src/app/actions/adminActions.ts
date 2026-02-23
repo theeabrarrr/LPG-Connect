@@ -143,6 +143,51 @@ export async function getPendingHandovers() {
     return enrichedData;
 }
 
+// 4.1 GET HANDOVER HISTORY (Approvals)
+export async function getHandoverHistory(filters?: { status?: string, driverId?: string, startDate?: string, endDate?: string }) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    const tenantId = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id;
+
+    // Fetch from handover_logs
+    let query = supabase
+        .from('handover_logs')
+        .select('*, sender:profiles!sender_id(full_name, role)')
+        .eq('tenant_id', tenantId)
+        .neq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+    if (filters?.status && filters.status !== 'all') {
+        query = query.eq('status', filters.status);
+    }
+    if (filters?.driverId && filters.driverId !== 'all') {
+        query = query.eq('sender_id', filters.driverId);
+    }
+    if (filters?.startDate) {
+        query = query.gte('created_at', filters.startDate);
+    }
+    if (filters?.endDate) {
+        query = query.lte('created_at', `${filters.endDate}T23:59:59.999Z`);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+        console.error("Error fetching handover history:", error);
+        return [];
+    }
+
+    // Map to normalized shape to match pending handovers
+    return data?.map(h => ({
+        ...h,
+        id: h.id,
+        transaction_id: h.id,
+        user_id: h.sender_id,
+        driver_name: (h.sender as any)?.full_name || 'Unknown',
+        users: { role: (h.sender as any)?.role || 'driver' }
+    })) || [];
+}
+
 // 4.5 HELPER: Get Pending Cylinder Details (For UI)
 export async function getPendingCylinderDetails() {
     const supabase = await createClient();
@@ -205,18 +250,57 @@ export async function getPendingPayments() {
 
     // Fetch transactions waiting for verificaion
     const { data, error } = await supabase
-        .from('transactions')
+        .from('cash_book_entries')
         .select(`
             *,
             customers (name)
         `)
         .eq('tenant_id', tenantId)
-        .eq('type', 'payment')
+        .eq('category', 'collection')
         .eq('status', 'pending_verification') // Explicit status for Bank/Cheque
         .order('created_at', { ascending: false });
 
     if (error) {
         console.error("Error fetching pending payments:", error);
+        return [];
+    }
+
+    return data || [];
+}
+
+// 5.1.B GET PAYMENT HISTORY
+export async function getPaymentHistory(filters?: { status?: string, startDate?: string, endDate?: string }) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    const tenantId = user.user_metadata?.tenant_id || user.app_metadata?.tenant_id;
+
+    let query = supabase
+        .from('cash_book_entries')
+        .select(`
+            *,
+            customers (name)
+        `)
+        .eq('tenant_id', tenantId)
+        .eq('category', 'collection')
+        .neq('status', 'pending_verification') // Exclude pending
+        .order('created_at', { ascending: false });
+
+    if (filters?.status && filters.status !== 'all') {
+        query = query.eq('status', filters.status);
+    }
+    if (filters?.startDate) {
+        query = query.gte('created_at', filters.startDate);
+    }
+    if (filters?.endDate) {
+        // To include the entire end day, we add 23:59:59
+        query = query.lte('created_at', `${filters.endDate}T23:59:59.999Z`);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+        console.error("Error fetching payment history:", error);
         return [];
     }
 
@@ -234,7 +318,7 @@ export async function verifyPayment(transactionId: string) {
 
     // 1. Get Transaction Details
     const { data: txn, error: txnError } = await supabase
-        .from('transactions')
+        .from('cash_book_entries')
         .select('*')
         .eq('id', transactionId)
         .eq('tenant_id', tenantId)
@@ -246,18 +330,18 @@ export async function verifyPayment(transactionId: string) {
     // 2. Perform Atomic Updates (Ideally RPC, but doing manual for now as per plan/speed)
     // A. Update Transaction Status
     const { error: updateError } = await supabase
-        .from('transactions')
-        .update({ status: 'verified', updated_at: new Date().toISOString() })
+        .from('cash_book_entries')
+        .update({ status: 'completed' })
         .eq('id', transactionId);
 
     if (updateError) return { error: "Failed to update transaction status" };
 
     // B. Credit Customer Balance (Reduce Debt)
     // Fetch current first
-    const { data: customer } = await supabase.from('customers').select('current_balance').eq('id', txn.user_id).single();
+    const { data: customer } = await supabase.from('customers').select('current_balance').eq('id', txn.customer_id).single();
     if (customer) {
         const newBalance = (customer.current_balance || 0) - Math.abs(txn.amount); // Reduce debt
-        await supabase.from('customers').update({ current_balance: newBalance }).eq('id', txn.user_id);
+        await supabase.from('customers').update({ current_balance: newBalance }).eq('id', txn.customer_id);
     }
 
     // C. Update Company Ledger (Real Money In) - Renamed to customer_ledgers
@@ -285,8 +369,8 @@ export async function rejectPayment(transactionId: string) {
 
     // Just mark as rejected. No financial rollback needed as it was never applied.
     const { error } = await supabase
-        .from('transactions')
-        .update({ status: 'rejected', updated_at: new Date().toISOString() })
+        .from('cash_book_entries')
+        .update({ status: 'rejected' })
         .eq('id', transactionId);
 
     if (error) return { error: "Failed to reject payment" };
@@ -304,7 +388,7 @@ export async function rejectHandover(transactionId: string) {
     if (!user || !tenantId) return { error: "Unauthorized" };
 
     const { data: txn } = await supabase
-        .from('transactions')
+        .from('cash_book_entries')
         .select('*')
         .eq('id', transactionId)
         .eq('receiver_id', user.id)
@@ -324,12 +408,12 @@ export async function rejectHandover(transactionId: string) {
         status: 'empty', // Revert to empty
         updated_at: new Date().toISOString()
     })
-        .eq('current_holder_id', txn.user_id)
+        .eq('current_holder_id', txn.created_by)
         .eq('status', 'handover_pending')
         .eq('tenant_id', tenantId);
 
     // 2. Mark Transaction Rejected
-    await supabase.from('transactions').update({
+    await supabase.from('cash_book_entries').update({
         status: 'rejected'
     }).eq('id', transactionId);
 

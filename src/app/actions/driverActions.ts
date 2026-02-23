@@ -375,11 +375,12 @@ export async function processHandover(formData: FormData) {
     }
 
     // B. Create Transaction
-    const { error: txnError } = await supabase.from('transactions').insert({
+    const { error: txnError } = await supabase.from('cash_book_entries').insert({
         tenant_id: tenantId,
-        user_id: user.id,
+        created_by: user.id, // Changed from user_id
         receiver_id: receiverId,
-        type: 'handover_request',
+        transaction_type: 'cash_in',
+        category: 'handover_request', // Changed from type
         status: 'pending',
         amount: depositAmount,
         description: `Handover Request: Rs ${depositAmount} + ${lockedCount} Cylinders`,

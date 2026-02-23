@@ -53,7 +53,7 @@ export function CustomerDebtCard({ customer }: CustomerDebtCardProps) {
                         <div className="flex flex-col items-end gap-3 shrink-0">
                             <div className="text-right">
                                 <div className="font-mono font-bold text-red-600 text-lg">
-                                    Rs {Math.abs(customer.current_balance).toLocaleString()}
+                                    Rs {Math.abs(customer.current_balance || 0).toLocaleString()}
                                 </div>
                                 <div className="text-[10px] uppercase font-bold text-red-400/80 tracking-wider text-right">
                                     Due Amount
@@ -62,7 +62,7 @@ export function CustomerDebtCard({ customer }: CustomerDebtCardProps) {
 
                             {/* Action Button Wrapper - logic handled by drawer, but styling can be passed if needed */}
                             <div className="w-full">
-                                <CollectionDrawer customer={customer}>
+                                <CollectionDrawer customer={{ ...customer, current_balance: customer.current_balance || 0, name: customer.name || '' }}>
                                     <div className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center justify-center gap-1 shadow-emerald-200 shadow-md transition-colors cursor-pointer w-full">
                                         Collect <ArrowBigRightDash className="w-4 h-4" />
                                     </div>
