@@ -37,11 +37,15 @@ export default async function proxy(request: NextRequest) {
             if (path.startsWith('/login') || path.startsWith('/signup')) {
                 const url = request.nextUrl.clone()
                 // Default Redirect based on Role
-                if (role === 'super_admin') url.pathname = '/super-admin'
+                if (role === 'super_admin') url.pathname = '/superadmin'
                 else if (role === 'driver') url.pathname = '/driver'
-                else if (role === 'recovery_agent') url.pathname = '/recovery'
-                else url.pathname = '/' // Admin / Manager
-                return NextResponse.redirect(url)
+                else if (role === 'recovery' || role === 'recovery_agent') url.pathname = '/recovery'
+                else if (role === 'admin' || role === 'shop_manager') url.pathname = '/'
+                else url.pathname = '/login'
+
+                if (url.pathname !== '/login') {
+                    return NextResponse.redirect(url)
+                }
             }
 
             // B. Strict Role Enforcement
@@ -51,22 +55,21 @@ export default async function proxy(request: NextRequest) {
                 // STRICT: Block /admin
                 if (path.startsWith('/admin')) {
                     const url = request.nextUrl.clone()
-                    url.pathname = '/super-admin'
+                    url.pathname = '/superadmin'
                     return NextResponse.redirect(url)
                 }
                 // Redirect Root to Super Admin
                 if (path === '/') {
                     const url = request.nextUrl.clone()
-                    url.pathname = '/super-admin'
+                    url.pathname = '/superadmin'
                     return NextResponse.redirect(url)
                 }
             }
 
             // DRIVER
-            if (role === 'driver') {
-                // Must NOT access /admin or /super-admin or / (Root Dashboard)
-                // User Request: "Allow `/driver`. Redirect away from Admin pages."
-                if (path.startsWith('/admin') || path.startsWith('/super-admin') || path === '/') {
+            else if (role === 'driver') {
+                // Must NOT access /admin or /superadmin or / (Root Dashboard)
+                if (path.startsWith('/admin') || path.startsWith('/superadmin') || path.startsWith('/super-admin') || path === '/') {
                     const url = request.nextUrl.clone()
                     url.pathname = '/driver'
                     return NextResponse.redirect(url)
@@ -74,9 +77,9 @@ export default async function proxy(request: NextRequest) {
             }
 
             // RECOVERY AGENT
-            if (role === 'recovery_agent') {
-                // Must NOT access /admin or /super-admin or /driver
-                if (path.startsWith('/admin') || path.startsWith('/super-admin') || path.startsWith('/driver') || path === '/') {
+            else if (role === 'recovery' || role === 'recovery_agent') {
+                // Must NOT access /admin or /superadmin or /driver
+                if (path.startsWith('/admin') || path.startsWith('/superadmin') || path.startsWith('/super-admin') || path.startsWith('/driver') || path === '/') {
                     const url = request.nextUrl.clone()
                     url.pathname = '/recovery'
                     return NextResponse.redirect(url)
@@ -84,11 +87,23 @@ export default async function proxy(request: NextRequest) {
             }
 
             // ADMIN / SHOP MANAGER
-            if (role === 'admin' || role === 'shop_manager') {
-                // Block /super-admin
-                if (path.startsWith('/super-admin')) {
+            else if (role === 'admin' || role === 'shop_manager' || role === 'cashier') {
+                // Block /superadmin
+                if (path.startsWith('/superadmin') || path.startsWith('/super-admin')) {
                     const url = request.nextUrl.clone()
                     url.pathname = '/'
+                    return NextResponse.redirect(url)
+                }
+            }
+
+            // UNAUTHORIZED / UNKNOWN ROLE
+            else {
+                // Prevents role fallthrough/data leaks.
+                console.error(`Middleware Blocked Access for Unknown Role: '${role}' on path: ${path}`);
+                if (!path.startsWith('/login')) {
+                    const url = request.nextUrl.clone()
+                    url.pathname = '/login'
+                    url.searchParams.set('error', 'InvalidRole')
                     return NextResponse.redirect(url)
                 }
             }

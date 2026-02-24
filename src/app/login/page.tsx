@@ -35,39 +35,21 @@ export default function LoginPage() {
 
             if (!user) throw new Error('Authentication failed. Please try again.');
 
-            // 2. Fetch Profile
-            const { data: profile, error: profileError } = await supabase
-                .from('users')
-                .select('*')
-                .eq('auth_id', user.id)
-                .maybeSingle();
-
-            if (profileError) {
-                console.error('Profile Fetch Error:', profileError);
-                throw new Error('System Error: Unable to retrieve user profile.');
-            }
+            // 2. Extract Role from JWT (Avoids Profile DB Race Conditions)
+            const role = user.user_metadata?.role;
+            const userName = user.user_metadata?.name || user.user_metadata?.full_name || 'User';
 
             // 3. Verify Identity
-            if (!profile) {
-                throw new Error('Account Setup Incomplete: Identity Missing. Please contact Admin.');
-            }
-
-            // 4. Check Role
-            const role = profile.role;
             if (!role) {
-                throw new Error('Access Denied: No role assigned.');
+                console.error("Login user_metadata:", user.user_metadata);
+                throw new Error('Access Denied: No role assigned in authentication claims.');
             }
 
             // Success
-            toast.success(`Welcome back, ${profile.name || 'User'}`);
+            toast.success(`Welcome back, ${userName}`);
 
-            // Redirect
-            // Redirect
-            if (role === 'super_admin') router.push('/super-admin');
-            else if (role === 'admin') router.push('/admin');
-            else if (role === 'driver') router.push('/driver');
-            else if (role === 'recovery_agent') router.push('/recovery');
-            else router.push('/');
+            // 4. Redirect - let middleware route appropriately based on JWT role
+            router.push('/');
 
         } catch (error: any) {
             console.error('Login Error:', error);
