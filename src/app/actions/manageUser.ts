@@ -41,7 +41,6 @@ export async function getStaffUsers() {
     const { data, error } = await supabase
         .from('profiles') // Changed from 'users' to 'profiles'
         .select('*')
-        .eq('role', 'staff')
         .eq('tenant_id', tenantId)  // ✅ FIXED: Added tenant filter
         .order('created_at', { ascending: false })
 
