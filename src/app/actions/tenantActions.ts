@@ -25,9 +25,9 @@ export async function checkSuperAdmin() {
 
     if (error || !user) return false;
 
-    // Check public users table for role
+    // Check public profiles table for role
     const { data: userData } = await supabase
-        .from('users')
+        .from('profiles')
         .select('role')
         .eq('id', user.id)
         .single();
@@ -50,7 +50,7 @@ export async function listTenants() {
         .from('tenants')
         .select(`
             *,
-            users:users(count)
+            profiles:profiles(count)
         `)
         .order('created_at', { ascending: false });
 
@@ -61,7 +61,7 @@ export async function listTenants() {
     // Transform data to include user count cleanly
     const enrichedTenants = tenants.map(t => ({
         ...t,
-        userCount: t.users?.[0]?.count || 0
+        userCount: t.profiles?.[0]?.count || 0
     }));
 
     return { success: true, data: enrichedTenants };
@@ -142,14 +142,13 @@ export async function createTenant(formData: FormData) {
 
         // 3. Create Public User Record (Manual Sync)
         const { error: publicUserError } = await supabaseAdmin
-            .from('users')
+            .from('profiles')
             .insert({
                 id: authUser.user.id,
                 email: adminEmail,
-                name: adminName,
+                full_name: adminName, // Using full_name for profiles
                 role: 'admin',
-                tenant_id: tenant.id, // Explicitly set tenant_id
-                status: 'active'
+                tenant_id: tenant.id
             });
 
         if (publicUserError) {
@@ -239,7 +238,7 @@ export async function getPlatformStats() {
         { count: orderCount }
     ] = await Promise.all([
         supabase.from('tenants').select('*', { count: 'exact', head: true }),
-        supabase.from('users').select('*', { count: 'exact', head: true }),
+        supabase.from('profiles').select('*', { count: 'exact', head: true }),
         supabase.from('orders').select('*', { count: 'exact', head: true }) // Super admin can see all
     ]);
 
